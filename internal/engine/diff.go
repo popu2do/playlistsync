@@ -346,8 +346,21 @@ func isValidTitleContains(sTitle, cTitle string, trackArtists []string) bool {
 		}
 		// 1. CJK / Hangul / Kana titles are complete semantic entities
 		if hasCJKRune(sub) && len(rSub) >= 2 {
-			if len(rSub) >= 4 || strings.HasPrefix(full, sub) || strings.HasSuffix(full, sub) {
+			if len(rSub) >= 4 {
 				return true
+			}
+			// For 2-3 char short CJK titles, ensure prefix/suffix is followed by a boundary delimiter
+			if strings.HasPrefix(full, sub) {
+				rem := full[len(sub):]
+				if rem == "" || strings.HasPrefix(rem, " ") || strings.HasPrefix(rem, "-") || strings.HasPrefix(rem, "—") || strings.HasPrefix(rem, "(") || strings.HasPrefix(rem, "（") || strings.HasPrefix(rem, "[") || strings.HasPrefix(rem, "【") {
+					return true
+				}
+			}
+			if strings.HasSuffix(full, sub) {
+				rem := full[:len(full)-len(sub)]
+				if rem == "" || strings.HasSuffix(rem, " ") || strings.HasSuffix(rem, "-") || strings.HasSuffix(rem, "—") || strings.HasSuffix(rem, ")") || strings.HasSuffix(rem, "）") || strings.HasSuffix(rem, "]") || strings.HasSuffix(rem, "】") {
+					return true
+				}
 			}
 			accounted := len(rSub)
 			for _, a := range artistVariants {
@@ -355,7 +368,7 @@ func isValidTitleContains(sTitle, cTitle string, trackArtists []string) bool {
 					accounted += len([]rune(normA))
 				}
 			}
-			if float64(accounted)/float64(len(rFull)) >= 0.35 {
+			if float64(accounted)/float64(len(rFull)) >= 0.45 {
 				return true
 			}
 		}

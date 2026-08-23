@@ -16,6 +16,10 @@ func writeFileAtomic(targetPath string, data []byte, perm os.FileMode) error {
 	cleanTarget := filepath.Clean(targetPath)
 	dir := filepath.Dir(cleanTarget)
 
+	if stat, err := os.Stat(dir); err != nil || !stat.IsDir() {
+		return fmt.Errorf("target directory does not exist: %s", dir)
+	}
+
 	tmpFile, err := os.CreateTemp(dir, "tmp-*")
 	if err != nil {
 		return fmt.Errorf("create temp file in %s: %w", dir, err)

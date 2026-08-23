@@ -360,25 +360,42 @@ func (s *Syncer) runSyncSpotifyToYouTube() (*model.SyncResult, error) {
 	var removedList []model.RemovedTrack
 	if s.cfg.CleanExtra {
 		recomputedDiff := ComputeDiff(spPlaylist, finalPl, mapping)
-		if len(recomputedDiff.ExtraInYTM) > 0 {
-			fmt.Printf("Notice: Found %d extraneous track(s) in destination YouTube Music playlist:\n", len(recomputedDiff.ExtraInYTM))
-			for _, t := range recomputedDiff.ExtraInYTM {
+		// Build protected ID set to ensure newly added and reviewed items are never pruned
+		protectedVids := make(map[string]bool)
+		for _, vid := range toAddVideoIDs {
+			protectedVids[vid] = true
+		}
+		for _, vid := range mapping {
+			if vid != "" {
+				protectedVids[vid] = true
+			}
+		}
+		var safeExtraInYTM []model.YTMTrack
+		for _, t := range recomputedDiff.ExtraInYTM {
+			if !protectedVids[t.VideoID] {
+				safeExtraInYTM = append(safeExtraInYTM, t)
+			}
+		}
+
+		if len(safeExtraInYTM) > 0 {
+			fmt.Printf("Notice: Found %d extraneous track(s) in destination YouTube Music playlist:\n", len(safeExtraInYTM))
+			for _, t := range safeExtraInYTM {
 				fmt.Printf(" - %s (%s)\n", t.Title, t.VideoID)
 			}
 			proceed := true
 			if !s.cfg.AutoYes && s.cfg.ConfirmPrompt != nil {
-				proceed = s.cfg.ConfirmPrompt(fmt.Sprintf("Confirm deletion of %d extraneous track(s) from '%s'?", len(recomputedDiff.ExtraInYTM), finalPl.Title))
+				proceed = s.cfg.ConfirmPrompt(fmt.Sprintf("Confirm deletion of %d extraneous track(s) from '%s'?", len(safeExtraInYTM), finalPl.Title))
 			}
 			if proceed {
-				fmt.Printf("Removing %d extra tracks from YouTube Music playlist...\n", len(recomputedDiff.ExtraInYTM))
-				for _, t := range recomputedDiff.ExtraInYTM {
+				fmt.Printf("Removing %d extra tracks from YouTube Music playlist...\n", len(safeExtraInYTM))
+				for _, t := range safeExtraInYTM {
 					removedList = append(removedList, model.RemovedTrack{
 						TargetTrackID: t.VideoID,
 						Title:         t.Title,
 						Artists:       t.Artists,
 					})
 				}
-				if err := s.yt.RemovePlaylistItems(playlistID, recomputedDiff.ExtraInYTM); err != nil {
+				if err := s.yt.RemovePlaylistItems(playlistID, safeExtraInYTM); err != nil {
 					return nil, fmt.Errorf("remove extra items: %w", err)
 				}
 				if refreshedPl, refErr := s.yt.GetPlaylist(playlistID); refErr == nil {
