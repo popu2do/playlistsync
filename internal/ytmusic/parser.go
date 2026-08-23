@@ -231,7 +231,7 @@ func parseListItem(item interface{}) *model.YTMTrack {
 	}
 	renderer, ok := itemMap["musicResponsiveListItemRenderer"].(map[string]interface{})
 	if !ok {
-		return nil
+		renderer = itemMap
 	}
 
 	track := &model.YTMTrack{}

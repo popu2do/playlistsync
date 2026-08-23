@@ -333,6 +333,54 @@ func TestEvaluateConfidence(t *testing.T) {
 			minScore: 0,
 		},
 		{
+			name: "Ultra-short Title (1 char 'H') with Empty Candidate Artist and Exact Duration Must Fail",
+			track: model.SpotifyTrack{
+				Title:    "H",
+				Artists:  []string{"Artist Name"},
+				Duration: "3:00",
+			},
+			candidate: model.YTMSearchResult{
+				VideoID:  "vid_short_h",
+				Title:    "H",
+				Artists:  []string{},
+				Duration: "3:00",
+			},
+			expected: false,
+			minScore: 0,
+		},
+		{
+			name: "Ultra-short Title (2 char 'OK') with Mismatched Artist and Exact Duration Must Fail",
+			track: model.SpotifyTrack{
+				Title:    "OK",
+				Artists:  []string{"Robin Schulz"},
+				Duration: "3:00",
+			},
+			candidate: model.YTMSearchResult{
+				VideoID:  "vid_short_ok",
+				Title:    "OK",
+				Artists:  []string{"Unrelated Band"},
+				Duration: "3:00",
+			},
+			expected: false,
+			minScore: 0,
+		},
+		{
+			name: "Ultra-short CJK Title (1 char '溯') with Mismatched Artist and Exact Duration Must Fail",
+			track: model.SpotifyTrack{
+				Title:    "溯",
+				Artists:  []string{"CORSAK"},
+				Duration: "4:00",
+			},
+			candidate: model.YTMSearchResult{
+				VideoID:  "vid_short_cjk",
+				Title:    "溯",
+				Artists:  []string{"Different Singer"},
+				Duration: "4:00",
+			},
+			expected: false,
+			minScore: 0,
+		},
+		{
 			name: "Chinese Song & Artist Match",
 			track: model.SpotifyTrack{
 				Title:   "测试曲目名称",
@@ -1004,3 +1052,84 @@ func TestCrossScriptArtistWithExactDurationNaturalPass(t *testing.T) {
 		t.Errorf("Expected diverging duration to fail threshold (< %d), got %d", engine.ConfidenceThreshold, scoreBadDur)
 	}
 }
+
+func TestShortTitleSafetyGate(t *testing.T) {
+	// Ultra-short song titles (rune length <= 2 of cleaned/normalized title, such as "H", "OK", "1", "U", "溯"):
+	// When there is NO positive artist match (artistScore <= 0 or !artistMatched),
+	// composite score must be clamped <= 55 (ConfidenceThreshold - 15) and EvaluateConfidence must return false,
+	// even with exact duration match (55 + 0 + 15 = 70 -> clamped to 55).
+	shortTitles := []string{"H", "OK", "1", "U", "溯", "Go"}
+
+	for _, title := range shortTitles {
+		t.Run("ZeroArtistScore_ClampTo55_"+title, func(t *testing.T) {
+			// Candidate has empty artist list and title does not mention artist -> artistScore = 0
+			track := model.SpotifyTrack{
+				Title:    title,
+				Artists:  []string{"Some Artist"},
+				Duration: "3:00",
+			}
+			cand := model.YTMSearchResult{
+				VideoID:  "vid_short_1",
+				Title:    title,
+				Artists:  []string{},
+				Duration: "3:00",
+			}
+
+			score := engine.CalculateScore(track, cand)
+			if score > 55 {
+				t.Errorf("Title %q: expected score <= 55 for short title with no artist match, got %d", title, score)
+			}
+
+			if engine.EvaluateConfidence(track, cand) {
+				t.Errorf("Title %q: expected EvaluateConfidence to return false for short title without artist match", title)
+			}
+		})
+
+		t.Run("ArtistMismatch_ClampTo55_"+title, func(t *testing.T) {
+			track := model.SpotifyTrack{
+				Title:    title,
+				Artists:  []string{"Taylor Swift"},
+				Duration: "3:00",
+			}
+			cand := model.YTMSearchResult{
+				VideoID:  "vid_short_2",
+				Title:    title,
+				Artists:  []string{"Coldplay"},
+				Duration: "3:00",
+			}
+
+			score := engine.CalculateScore(track, cand)
+			if score > 55 {
+				t.Errorf("Title %q: expected score <= 55 for short title with mismatched artist, got %d", title, score)
+			}
+
+			if engine.EvaluateConfidence(track, cand) {
+				t.Errorf("Title %q: expected EvaluateConfidence to return false for short title with mismatched artist", title)
+			}
+		})
+
+		t.Run("PositiveArtistMatch_PassesThreshold_"+title, func(t *testing.T) {
+			track := model.SpotifyTrack{
+				Title:    title,
+				Artists:  []string{"Known Artist"},
+				Duration: "3:00",
+			}
+			cand := model.YTMSearchResult{
+				VideoID:  "vid_short_3",
+				Title:    title,
+				Artists:  []string{"Known Artist"},
+				Duration: "3:00",
+			}
+
+			score := engine.CalculateScore(track, cand)
+			if score < engine.ConfidenceThreshold {
+				t.Errorf("Title %q: expected score >= %d for short title with matching artist, got %d", title, engine.ConfidenceThreshold, score)
+			}
+
+			if !engine.EvaluateConfidence(track, cand) {
+				t.Errorf("Title %q: expected EvaluateConfidence to return true for short title with matching artist", title)
+			}
+		})
+	}
+}
+

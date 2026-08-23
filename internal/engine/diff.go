@@ -249,6 +249,26 @@ func CalculateTrackScore(title1 string, artists1 []string, dur1 string, title2 s
 	versionPenalty := matchVersionSemantics(title1, title2)
 
 	score := titleScore + artistScore + durationScore + versionPenalty
+
+	// Short Title Safety Gate:
+	// For ultra-short song titles (rune length <= 2 of cleaned/normalized title, such as "H", "OK", "1", "U", "溯"):
+	// If there is NO positive artist match (artistScore <= 0 or !artistMatched), clamp the composite score
+	// below ConfidenceThreshold (<= ConfidenceThreshold - 15, i.e. 55) to prevent accidental automated bypass on coincidental duration match alone.
+	cleanLen1 := len([]rune(sTitleClean))
+	if cleanLen1 == 0 {
+		cleanLen1 = len([]rune(sTitle))
+	}
+	cleanLen2 := len([]rune(cTitleClean))
+	if cleanLen2 == 0 {
+		cleanLen2 = len([]rune(cTitle))
+	}
+	if (cleanLen1 <= 2 || cleanLen2 <= 2) && (!artistMatched || artistScore <= 0) {
+		maxShortScore := ConfidenceThreshold - 15
+		if score > maxShortScore {
+			score = maxShortScore
+		}
+	}
+
 	if score > 100 {
 		score = 100
 	}

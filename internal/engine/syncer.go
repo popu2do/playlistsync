@@ -427,43 +427,21 @@ func (s *Syncer) runSyncSpotifyToYouTube() (*model.SyncResult, error) {
 		}
 	}
 
-	sort.Slice(skippedList, func(i, j int) bool {
-		return skippedList[i].Index < skippedList[j].Index
-	})
-
-	matchedOrAdded := len(spPlaylist.Tracks) - len(skippedList)
-	if matchedOrAdded < 0 {
-		matchedOrAdded = 0
-	}
-
-	result := &model.SyncResult{
-		Direction:          "spotify-to-youtube-music",
+	return s.finalizeSyncResult(syncResultParams{
+		Direction:          DirectionSpotifyToYouTube,
 		SourcePlatform:     "spotify",
 		TargetPlatform:     "youtube-music",
-		PlaylistID:         playlistID,
-		PlaylistURL:        fmt.Sprintf("https://music.youtube.com/playlist?list=%s", playlistID),
-		WebURL:             fmt.Sprintf("https://www.youtube.com/playlist?list=%s", playlistID),
-		Title:              finalPl.Title,
+		TargetPlaylistID:   playlistID,
+		TargetTitle:        finalPl.Title,
+		TargetTrackCount:   len(finalPl.Tracks),
+		TargetDescription:  finalPl.Description,
+		SourcePlaylistName: spPlaylist.PlaylistName,
 		SourcePlaylistURL:  spPlaylist.SourcePlaylistURL,
 		TotalSourceTracks:  len(spPlaylist.Tracks),
-		AddedTracks:        matchedOrAdded,
-		SkippedTracks:      len(skippedList),
-		Skipped:            skippedList,
+		SkippedTracks:      skippedList,
 		AddedAfterReview:   reviewedAdditions,
 		RemovedExtraTracks: removedList,
-		LastSyncedAt:       time.Now().UTC().Format(time.RFC3339),
-		Verification: &model.Verification{
-			PageTitle:      finalPl.Title,
-			PageTrackCount: len(finalPl.Tracks),
-			Description:    finalPl.Description,
-		},
-	}
-
-	saveSyncArtifacts(result, s.cfg.ResultJSONPath, s.cfg.FinalReportPath, s.cfg.OutputDir, spPlaylist.PlaylistName, "spotify", "ytmusic")
-
-	fmt.Printf("\nSync completed: [%s] -> [%s] | Total: %d, Added: %d, Skipped: %d, Removed: %d\n",
-		spPlaylist.PlaylistName, result.Title, result.TotalSourceTracks, result.AddedTracks, result.SkippedTracks, len(result.RemovedExtraTracks))
-	return result, nil
+	}), nil
 }
 
 func (s *Syncer) runSyncYouTubeToSpotify() (*model.SyncResult, error) {
@@ -768,43 +746,21 @@ func (s *Syncer) runSyncYouTubeToSpotify() (*model.SyncResult, error) {
 		}
 	}
 
-	sort.Slice(skippedList, func(i, j int) bool {
-		return skippedList[i].Index < skippedList[j].Index
-	})
-
-	matchedOrAdded := len(ytmPlaylist.Tracks) - len(skippedList)
-	if matchedOrAdded < 0 {
-		matchedOrAdded = 0
-	}
-
-	result := &model.SyncResult{
-		Direction:          "youtube-music-to-spotify",
+	return s.finalizeSyncResult(syncResultParams{
+		Direction:          DirectionYouTubeToSpotify,
 		SourcePlatform:     "youtube-music",
 		TargetPlatform:     "spotify",
-		PlaylistID:         spPlaylistID,
-		PlaylistURL:        fmt.Sprintf("https://open.spotify.com/playlist/%s", spPlaylistID),
-		WebURL:             fmt.Sprintf("https://open.spotify.com/playlist/%s", spPlaylistID),
-		Title:              finalPl.PlaylistName,
+		TargetPlaylistID:   spPlaylistID,
+		TargetTitle:        finalPl.PlaylistName,
+		TargetTrackCount:   len(finalPl.Tracks),
+		TargetDescription:  ytmPlaylist.Description,
+		SourcePlaylistName: ytmPlaylist.Title,
 		SourcePlaylistURL:  fmt.Sprintf("https://music.youtube.com/playlist?list=%s", ytmPlaylist.ID),
 		TotalSourceTracks:  len(ytmPlaylist.Tracks),
-		AddedTracks:        matchedOrAdded,
-		SkippedTracks:      len(skippedList),
-		Skipped:            skippedList,
+		SkippedTracks:      skippedList,
 		AddedAfterReview:   spReviewOutcome.ReviewedAdditions,
 		RemovedExtraTracks: removedList,
-		LastSyncedAt:       time.Now().UTC().Format(time.RFC3339),
-		Verification: &model.Verification{
-			PageTitle:      finalPl.PlaylistName,
-			PageTrackCount: len(finalPl.Tracks),
-			Description:    ytmPlaylist.Description,
-		},
-	}
-
-	saveSyncArtifacts(result, s.cfg.ResultJSONPath, s.cfg.FinalReportPath, s.cfg.OutputDir, ytmPlaylist.Title, "ytmusic", "spotify")
-
-	fmt.Printf("\nSync completed: [%s] -> [%s] | Total: %d, Added: %d, Skipped: %d, Removed: %d\n",
-		ytmPlaylist.Title, result.Title, result.TotalSourceTracks, result.AddedTracks, result.SkippedTracks, len(result.RemovedExtraTracks))
-	return result, nil
+	}), nil
 }
 
 func cleanYTMPlaylistID(raw string) string {
@@ -966,6 +922,78 @@ func waitForPlaylistWithTrackCount[T any](expectedMin int, maxAttempts int, init
 		}
 	}
 	return empty, false
+}
+
+type syncResultParams struct {
+	Direction          SyncDirection
+	SourcePlatform     string
+	TargetPlatform     string
+	TargetPlaylistID   string
+	TargetTitle        string
+	TargetTrackCount   int
+	TargetDescription  string
+	SourcePlaylistName string
+	SourcePlaylistURL  string
+	TotalSourceTracks  int
+	SkippedTracks      []model.SkippedTrack
+	AddedAfterReview   []model.AddedTrack
+	RemovedExtraTracks []model.RemovedTrack
+}
+
+// finalizeSyncResult encapsulates sorting skipped tracks, calculating metrics, assembling SyncResult,
+// persisting sync artifacts, and printing the completion summary.
+func (s *Syncer) finalizeSyncResult(p syncResultParams) *model.SyncResult {
+	sort.Slice(p.SkippedTracks, func(i, j int) bool {
+		return p.SkippedTracks[i].Index < p.SkippedTracks[j].Index
+	})
+
+	matchedOrAdded := p.TotalSourceTracks - len(p.SkippedTracks)
+	if matchedOrAdded < 0 {
+		matchedOrAdded = 0
+	}
+
+	var playlistURL, webURL, fromPlatform, toPlatform string
+	switch p.Direction {
+	case DirectionYouTubeToSpotify:
+		playlistURL = fmt.Sprintf("https://open.spotify.com/playlist/%s", p.TargetPlaylistID)
+		webURL = fmt.Sprintf("https://open.spotify.com/playlist/%s", p.TargetPlaylistID)
+		fromPlatform = "ytmusic"
+		toPlatform = "spotify"
+	default:
+		playlistURL = fmt.Sprintf("https://music.youtube.com/playlist?list=%s", p.TargetPlaylistID)
+		webURL = fmt.Sprintf("https://www.youtube.com/playlist?list=%s", p.TargetPlaylistID)
+		fromPlatform = "spotify"
+		toPlatform = "ytmusic"
+	}
+
+	result := &model.SyncResult{
+		Direction:          string(p.Direction),
+		SourcePlatform:     p.SourcePlatform,
+		TargetPlatform:     p.TargetPlatform,
+		PlaylistID:         p.TargetPlaylistID,
+		PlaylistURL:        playlistURL,
+		WebURL:             webURL,
+		Title:              p.TargetTitle,
+		SourcePlaylistURL:  p.SourcePlaylistURL,
+		TotalSourceTracks:  p.TotalSourceTracks,
+		AddedTracks:        matchedOrAdded,
+		SkippedTracks:      len(p.SkippedTracks),
+		Skipped:            p.SkippedTracks,
+		AddedAfterReview:   p.AddedAfterReview,
+		RemovedExtraTracks: p.RemovedExtraTracks,
+		LastSyncedAt:       time.Now().UTC().Format(time.RFC3339),
+		Verification: &model.Verification{
+			PageTitle:      p.TargetTitle,
+			PageTrackCount: p.TargetTrackCount,
+			Description:    p.TargetDescription,
+		},
+	}
+
+	saveSyncArtifacts(result, s.cfg.ResultJSONPath, s.cfg.FinalReportPath, s.cfg.OutputDir, p.SourcePlaylistName, fromPlatform, toPlatform)
+
+	fmt.Printf("\nSync completed: [%s] -> [%s] | Total: %d, Added: %d, Skipped: %d, Removed: %d\n",
+		p.SourcePlaylistName, result.Title, result.TotalSourceTracks, result.AddedTracks, result.SkippedTracks, len(result.RemovedExtraTracks))
+	return result
 }
 
 // saveSyncArtifacts saves the canonical sync result and report JSON files atomically

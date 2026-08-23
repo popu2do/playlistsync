@@ -175,7 +175,7 @@ AuthHeader = "SAPISIDHASH " + T + "_" + Hash
       }
     },
     "query": "Song Title Artist Name",
-    "params": "Eg-KAQwIABAAGAAgACgB"
+    "params": "EgWKAQIIAWoSEAUQAxAEEAkQChAOEBAQFRAR"
   }
   ```
 

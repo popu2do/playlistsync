@@ -346,6 +346,10 @@ func TestClient_EndToEndOperations(t *testing.T) {
 				w.Write([]byte(`{"error": "search failed"}`))
 				return
 			}
+			params, _ := body["params"].(string)
+			if params != SearchFilterSongs {
+				t.Errorf("expected search params %q, got %q", SearchFilterSongs, params)
+			}
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{
 				"contents": {
@@ -362,7 +366,39 @@ func TestClient_EndToEndOperations(t *testing.T) {
 															"playlistItemData": {"videoId": "search_vid_123"},
 															"flexColumns": [
 																{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Found Song"}]}}},
-																{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Found Artist"}]}}}
+																{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [
+																	{"text": "Song"},
+																	{"text": " • "},
+																	{
+																		"text": "Found Artist",
+																		"navigationEndpoint": {
+																			"browseEndpoint": {
+																				"browseId": "UC_found_artist",
+																				"browseEndpointContextSupportedConfigs": {
+																					"browseEndpointContextMusicConfig": {
+																						"pageType": "MUSIC_PAGE_TYPE_ARTIST"
+																					}
+																				}
+																			}
+																		}
+																	},
+																	{"text": " • "},
+																	{
+																		"text": "Found Album",
+																		"navigationEndpoint": {
+																			"browseEndpoint": {
+																				"browseId": "MPREb_found_album",
+																				"browseEndpointContextSupportedConfigs": {
+																					"browseEndpointContextMusicConfig": {
+																						"pageType": "MUSIC_PAGE_TYPE_ALBUM"
+																					}
+																				}
+																			}
+																		}
+																	},
+																	{"text": " • "},
+																	{"text": "3:45"}
+																]}}}
 															]
 														}
 													}
@@ -532,7 +568,16 @@ func TestClient_EndToEndOperations(t *testing.T) {
 			t.Fatalf("SearchSong failed: %v", err)
 		}
 		if len(results) != 1 || results[0].VideoID != "search_vid_123" {
-			t.Errorf("unexpected search results: %+v", results)
+			t.Fatalf("unexpected search results: %+v", results)
+		}
+		if results[0].Title != "Found Song" {
+			t.Errorf("expected title 'Found Song', got %q", results[0].Title)
+		}
+		if len(results[0].Artists) != 1 || results[0].Artists[0] != "Found Artist" {
+			t.Errorf("expected artists ['Found Artist'], got %+v", results[0].Artists)
+		}
+		if results[0].Duration != "3:45" {
+			t.Errorf("expected duration '3:45', got %q", results[0].Duration)
 		}
 
 		// Error query
@@ -760,78 +805,272 @@ func TestParsePlaylistResponse_ContinuationContents(t *testing.T) {
 }
 
 func TestParseSearchResults(t *testing.T) {
-	searchJSON := `{
-		"contents": {
-			"tabbedSearchResultsRenderer": {
-				"tabs": [
-					{
-						"tabRenderer": {
-							"content": {
-								"sectionListRenderer": {
-									"contents": [
-										{
-											"musicShelfRenderer": {
-												"contents": [
-													{
-														"musicResponsiveListItemRenderer": {
-															"playlistItemData": {
-																"videoId": "searchVid1"
-															},
-															"flexColumns": [
-																{
-																	"musicResponsiveListItemFlexColumnRenderer": {
-																		"text": {
-																			"runs": [{"text": "Searched Song"}]
-																		}
-																	}
+	t.Run("Standard search with flexColumns metadata and duration", func(t *testing.T) {
+		searchJSON := `{
+			"contents": {
+				"tabbedSearchResultsRenderer": {
+					"tabs": [
+						{
+							"tabRenderer": {
+								"content": {
+									"sectionListRenderer": {
+										"contents": [
+											{
+												"musicShelfRenderer": {
+													"contents": [
+														{
+															"musicResponsiveListItemRenderer": {
+																"playlistItemData": {
+																	"videoId": "searchVid1"
 																},
-																{
-																	"musicResponsiveListItemFlexColumnRenderer": {
-																		"text": {
-																			"runs": [{"text": "Searched Artist"}]
+																"flexColumns": [
+																	{
+																		"musicResponsiveListItemFlexColumnRenderer": {
+																			"text": {
+																				"runs": [{"text": "Searched Song"}]
+																			}
+																		}
+																	},
+																	{
+																		"musicResponsiveListItemFlexColumnRenderer": {
+																			"text": {
+																				"runs": [
+																					{"text": "Song"},
+																					{"text": " • "},
+																					{
+																						"text": "Searched Artist",
+																						"navigationEndpoint": {
+																							"browseEndpoint": {
+																								"browseId": "UC_searched_artist",
+																								"browseEndpointContextSupportedConfigs": {
+																									"browseEndpointContextMusicConfig": {
+																										"pageType": "MUSIC_PAGE_TYPE_ARTIST"
+																									}
+																								}
+																							}
+																						}
+																					},
+																					{"text": " • "},
+																					{
+																						"text": "Searched Album",
+																						"navigationEndpoint": {
+																							"browseEndpoint": {
+																								"browseId": "MPREb_searched_album",
+																								"browseEndpointContextSupportedConfigs": {
+																									"browseEndpointContextMusicConfig": {
+																										"pageType": "MUSIC_PAGE_TYPE_ALBUM"
+																									}
+																								}
+																							}
+																						}
+																					},
+																					{"text": " • "},
+																					{"text": "3:42"}
+																				]
+																			}
 																		}
 																	}
-																}
-															]
+																]
+															}
 														}
-													}
-												]
+													]
+												}
 											}
-										}
-									]
+										]
+									}
 								}
 							}
 						}
-					}
-				]
+					]
+				}
 			}
+		}`
+
+		results := parseSearchResults([]byte(searchJSON))
+		if len(results) != 1 {
+			t.Fatalf("expected 1 search result, got %d", len(results))
 		}
-	}`
+		if results[0].VideoID != "searchVid1" {
+			t.Errorf("expected videoId 'searchVid1', got %q", results[0].VideoID)
+		}
+		if results[0].Title != "Searched Song" {
+			t.Errorf("expected title 'Searched Song', got %q", results[0].Title)
+		}
+		if len(results[0].Artists) != 1 || results[0].Artists[0] != "Searched Artist" {
+			t.Errorf("artists mismatch: %+v", results[0].Artists)
+		}
+		if results[0].Duration != "3:42" {
+			t.Errorf("expected duration '3:42', got %q", results[0].Duration)
+		}
+	})
 
-	results := parseSearchResults([]byte(searchJSON))
-	if len(results) != 1 {
-		t.Fatalf("expected 1 search result, got %d", len(results))
-	}
-	if results[0].VideoID != "searchVid1" || results[0].Title != "Searched Song" {
-		t.Errorf("search result mismatch: %+v", results[0])
-	}
-	if len(results[0].Artists) != 1 || results[0].Artists[0] != "Searched Artist" {
-		t.Errorf("artists mismatch: %+v", results[0].Artists)
-	}
+	t.Run("Search with fixedColumns duration (Desktop Web Remix layout)", func(t *testing.T) {
+		searchJSON := `{
+			"contents": {
+				"tabbedSearchResultsRenderer": {
+					"tabs": [
+						{
+							"tabRenderer": {
+								"content": {
+									"sectionListRenderer": {
+										"contents": [
+											{
+												"musicShelfRenderer": {
+													"contents": [
+														{
+															"musicResponsiveListItemRenderer": {
+																"playlistItemData": {
+																	"videoId": "fixedVid2"
+																},
+																"flexColumns": [
+																	{
+																		"musicResponsiveListItemFlexColumnRenderer": {
+																			"text": {
+																				"runs": [{"text": "Fixed Column Song"}]
+																			}
+																		}
+																	},
+																	{
+																		"musicResponsiveListItemFlexColumnRenderer": {
+																			"text": {
+																				"runs": [
+																					{"text": "Fixed Artist"}
+																				]
+																			}
+																		}
+																	}
+																],
+																"fixedColumns": [
+																	{
+																		"musicResponsiveListItemFixedColumnRenderer": {
+																			"text": {
+																				"runs": [{"text": "4:15"}]
+																			}
+																		}
+																	}
+																]
+															}
+														}
+													]
+												}
+											}
+										]
+									}
+								}
+							}
+						}
+					]
+				}
+			}
+		}`
 
-	// Empty and invalid inputs
-	if res := parseSearchResults([]byte("bad json")); res != nil {
-		t.Errorf("expected nil for bad json")
-	}
-	if res := parseSearchResults([]byte("{}")); res != nil {
-		t.Errorf("expected nil for empty object")
-	}
-	if res := parseSearchResults([]byte(`{"contents": {}}`)); res != nil {
-		t.Errorf("expected nil for empty contents")
-	}
-	if res := parseSearchResults([]byte(`{"contents": {"tabbedSearchResultsRenderer": {"tabs": []}}}`)); res != nil {
-		t.Errorf("expected nil for empty tabs")
-	}
+		results := parseSearchResults([]byte(searchJSON))
+		if len(results) != 1 {
+			t.Fatalf("expected 1 search result, got %d", len(results))
+		}
+		if results[0].VideoID != "fixedVid2" || results[0].Title != "Fixed Column Song" {
+			t.Errorf("search result mismatch: %+v", results[0])
+		}
+		if len(results[0].Artists) != 1 || results[0].Artists[0] != "Fixed Artist" {
+			t.Errorf("artists mismatch: %+v", results[0].Artists)
+		}
+		if results[0].Duration != "4:15" {
+			t.Errorf("expected duration '4:15', got %q", results[0].Duration)
+		}
+	})
+
+	t.Run("Search with itemSectionRenderer and musicCardShelfRenderer", func(t *testing.T) {
+		searchJSON := `{
+			"contents": {
+				"tabbedSearchResultsRenderer": {
+					"tabs": [
+						{
+							"tabRenderer": {
+								"content": {
+									"sectionListRenderer": {
+										"contents": [
+											{
+												"itemSectionRenderer": {
+													"contents": [
+														{
+															"musicResponsiveListItemRenderer": {
+																"playlistItemData": {
+																	"videoId": "itemSecVid"
+																},
+																"flexColumns": [
+																	{
+																		"musicResponsiveListItemFlexColumnRenderer": {
+																			"text": {"runs": [{"text": "Item Section Song"}]}
+																		}
+																	},
+																	{
+																		"musicResponsiveListItemFlexColumnRenderer": {
+																			"text": {"runs": [{"text": "Item Sec Artist"}, {"text": " • "}, {"text": "2:50"}]}
+																		}
+																	}
+																]
+															}
+														}
+													]
+												}
+											},
+											{
+												"musicCardShelfRenderer": {
+													"musicResponsiveListItemRenderer": {
+														"playlistItemData": {
+															"videoId": "cardShelfVid"
+														},
+														"flexColumns": [
+															{
+																"musicResponsiveListItemFlexColumnRenderer": {
+																	"text": {"runs": [{"text": "Card Shelf Song"}]}
+																}
+															},
+															{
+																"musicResponsiveListItemFlexColumnRenderer": {
+																	"text": {"runs": [{"text": "Card Artist"}, {"text": " • "}, {"text": "5:10"}]}
+																}
+															}
+														]
+													}
+												}
+											}
+										]
+									}
+								}
+							}
+						}
+					]
+				}
+			}
+		}`
+
+		results := parseSearchResults([]byte(searchJSON))
+		if len(results) != 2 {
+			t.Fatalf("expected 2 search results, got %d", len(results))
+		}
+		if results[0].VideoID != "itemSecVid" || results[0].Duration != "2:50" {
+			t.Errorf("first result mismatch: %+v", results[0])
+		}
+		if results[1].VideoID != "cardShelfVid" || results[1].Duration != "5:10" {
+			t.Errorf("second result mismatch: %+v", results[1])
+		}
+	})
+
+	t.Run("Malformed and empty payloads", func(t *testing.T) {
+		if res := parseSearchResults([]byte("bad json")); res != nil {
+			t.Errorf("expected nil for bad json")
+		}
+		if res := parseSearchResults([]byte("{}")); res != nil {
+			t.Errorf("expected nil for empty object")
+		}
+		if res := parseSearchResults([]byte(`{"contents": {}}`)); res != nil {
+			t.Errorf("expected nil for empty contents")
+		}
+		if res := parseSearchResults([]byte(`{"contents": {"tabbedSearchResultsRenderer": {"tabs": []}}}`)); res != nil {
+			t.Errorf("expected nil for empty tabs")
+		}
+	})
 }
 
 func TestParseListItem_Empty(t *testing.T) {

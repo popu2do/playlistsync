@@ -312,13 +312,13 @@ func GenerateSAPISIDHash(sapisid string, origin string) string {
 所有接口统一 POST 至 `https://music.youtube.com/youtubei/v1/<endpoint>?prettyPrint=false`：
 
 #### 1. 歌曲搜索 (`/youtubei/v1/search`)
-- **Params**: `Eg-KAQwIABAAGAAgACgB`（限定搜索类型为 Songs/Tracks）
+- **Params**: `EgWKAQIIAWoSEAUQAxAEEAkQChAOEBAQFRAR`（限定搜索类型为 Songs/Tracks）
 - **Payload**:
   ```json
   {
     "context": { "client": { "clientName": "WEB_REMIX", "clientVersion": "1.20260822.01.00", "hl": "zh-CN", "gl": "US" } },
     "query": "晴天 周杰伦",
-    "params": "Eg-KAQwIABAAGAAgACgB"
+    "params": "EgWKAQIIAWoSEAUQAxAEEAkQChAOEBAQFRAR"
   }
   ```
 

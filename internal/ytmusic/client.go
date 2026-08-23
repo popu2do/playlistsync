@@ -28,6 +28,11 @@ var (
 const (
 	ClientName    = "WEB_REMIX"
 	ClientVersion = "1.20260822.01.00"
+
+	// SearchFilterSongs is the Innertube protobuf search filter parameter for "Songs" (WEB_REMIX client).
+	// Modern YouTube Music requires this filter parameter to return pure song items with full duration
+	// metadata in flexColumns/fixedColumns instead of falling back to the mixed overview search page.
+	SearchFilterSongs = "EgWKAQIIAWoSEAUQAxAEEAkQChAOEBAQFRAR"
 )
 
 // Client handles authenticated requests to YouTube Music Innertube API
@@ -407,11 +412,11 @@ func (c *Client) AddPlaylistItems(playlistID string, videoIDs []string) error {
 	return nil
 }
 
-// SearchSong searches for songs on YouTube Music
+// SearchSong searches for songs on YouTube Music using the Web Remix Songs filter
 func (c *Client) SearchSong(query string) ([]model.YTMSearchResult, error) {
 	payload := clientContext("zh-CN", "US")
 	payload["query"] = query
-	payload["params"] = "Eg-KAQwIABAAGAAgACgB"
+	payload["params"] = SearchFilterSongs
 
 	respBytes, err := c.post(EndpointSearch, payload)
 	if err != nil {
