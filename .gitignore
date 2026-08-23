@@ -1,0 +1,54 @@
+# Binaries & Build Output
+bin/
+dist/
+build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test Artifacts & Coverage
+*.out
+*.test
+coverage.txt
+coverage.html
+
+# Go Build Cache & Dependencies
+.cache/
+# .gocache/ # 当你试图将工具链产物放根目录下说明你犯错了！
+vendor/
+
+# OS, Editor & Agent Metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.dsh*
+.claude/
+.agent/
+
+# All runtime credentials, inputs, and generated files live in output/ and are 100% ignored
+output/
+
+# Credentials, Secrets, Tokens & Environment Configurations
+*.env
+.env
+.env.*
+browser.json
+*_credentials.json
+*credentials*.json
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Runtime Logs
+*.log
+logs/
+tmp/
+temp/
