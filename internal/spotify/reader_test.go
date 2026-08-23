@@ -450,8 +450,26 @@ func TestSpotifyClient_FindPlaylist_SearchAndPagination(t *testing.T) {
 	}))
 	defer ts.Close()
 
+	origPlaylists := spotify.EndpointPlaylists
+	origMePlaylists := spotify.EndpointMePlaylists
+	origSearch := spotify.EndpointSearch
+	spotify.EndpointPlaylists = ts.URL + "/v1/playlists"
+	spotify.EndpointMePlaylists = ts.URL + "/v1/me/playlists"
+	spotify.EndpointSearch = ts.URL + "/v1/search"
+	defer func() {
+		spotify.EndpointPlaylists = origPlaylists
+		spotify.EndpointMePlaylists = origMePlaylists
+		spotify.EndpointSearch = origSearch
+	}()
+
 	c := spotify.NewClient("mock_token", "")
-	_ = c
+	pl, err := c.FindPlaylist("NANASA")
+	if err != nil {
+		t.Fatalf("FindPlaylist(NANASA) error: %v", err)
+	}
+	if pl == nil || pl.PlaylistName != "NANASA" || len(pl.Tracks) != 1 {
+		t.Fatalf("FindPlaylist(NANASA) unexpected result: %+v", pl)
+	}
 }
 
 func TestSpotifyClient_OperationsAndBatchChunking(t *testing.T) {

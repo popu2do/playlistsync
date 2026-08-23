@@ -23,6 +23,7 @@ var (
 	}
 
 	reDurationPattern = regexp.MustCompile(`\b\d{1,2}:\d{2}(?::\d{2})?\b`)
+	reYearPattern     = regexp.MustCompile(`^\b(19|20)\d{2}\b$`)
 )
 
 // parsePlaylistResponse parses the raw Innertube browse response into a YTMPlaylist
@@ -434,7 +435,7 @@ func parseFlexColumns(flexCols []interface{}, track *model.YTMTrack) {
 			}
 			continue
 		}
-		if isSeparatorText(t) || isAlbumNode(n) || isStatsText(t) || isTypeIndicatorText(t) {
+		if isSeparatorText(t) || isAlbumNode(n) || isStatsText(t) || isTypeIndicatorText(t) || reYearPattern.MatchString(t) {
 			continue
 		}
 		if !seenFallback[t] {

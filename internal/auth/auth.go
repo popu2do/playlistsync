@@ -377,10 +377,6 @@ func StartCDPLoginWithContext(ctx context.Context, targetURL string, savePath st
 				if !strings.Contains(cookies, "__Secure-3PAPISID=") && !strings.Contains(cookies, "SID=") {
 					continue
 				}
-				status, err := ValidateYTMCookieString(cookies, proxyURL)
-				if err != nil || status == nil || !status.Authenticated {
-					continue
-				}
 				if err := SaveRawCookieMap(savePath, cookies); err != nil {
 					return fmt.Errorf("save youtube credentials: %w", err)
 				}

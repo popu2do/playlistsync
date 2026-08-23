@@ -129,13 +129,25 @@ func Summarize(spotifyPath, resultPath string) error {
 
 // Validate checks integrity of migration artifacts
 func Validate(spotifyPath, resultPath, reportPath string) error {
+	var sourceTotal int
 	sp, err := readJSON[model.SpotifyPlaylist](
 		spotifyPath,
-		"source Spotify playlist file not found at %s",
-		"corrupted Spotify playlist file %s: %w",
+		"source playlist file not found at %s",
+		"corrupted playlist file %s: %w",
 	)
-	if err != nil {
-		return err
+	if err == nil && sp != nil {
+		sourceTotal = len(sp.Tracks)
+	} else {
+		// Attempt parsing as YouTube Music source playlist for bidirectional migrations
+		ytm, ytmErr := readJSON[model.YTMPlaylist](
+			spotifyPath,
+			"source playlist file not found at %s",
+			"corrupted playlist file %s: %w",
+		)
+		if ytmErr != nil {
+			return fmt.Errorf("read source playlist at %s: %w", spotifyPath, err)
+		}
+		sourceTotal = len(ytm.Tracks)
 	}
 
 	res, err := readJSON[model.SyncResult](
@@ -163,11 +175,13 @@ func Validate(spotifyPath, resultPath, reportPath string) error {
 		}
 	}
 
-	sourceTotal := len(sp.Tracks)
 	sourceCount := res.TotalSourceTracks
 
 	check(sourceCount == sourceTotal, "source_total mismatch (source tracks: %d in %s != result TotalTracks: %d)", sourceTotal, spotifyPath, sourceCount)
 	check(res.AddedTracks >= 0 && res.SkippedTracks >= 0, "negative track counts in result (added: %d, skipped: %d)", res.AddedTracks, res.SkippedTracks)
+	check(res.TotalSourceTracks == res.AddedTracks+res.SkippedTracks,
+		"Invariant 1 violation (total conservation): TotalSourceTracks (%d) != AddedTracks (%d) + SkippedTracks (%d)",
+		res.TotalSourceTracks, res.AddedTracks, res.SkippedTracks)
 	if len(res.Skipped) > 0 {
 		check(res.SkippedTracks == len(res.Skipped), "skipped track count mismatch (SkippedTracks: %d != len(Skipped): %d)", res.SkippedTracks, len(res.Skipped))
 	}

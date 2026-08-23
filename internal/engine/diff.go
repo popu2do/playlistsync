@@ -346,7 +346,18 @@ func isValidTitleContains(sTitle, cTitle string, trackArtists []string) bool {
 		}
 		// 1. CJK / Hangul / Kana titles are complete semantic entities
 		if hasCJKRune(sub) && len(rSub) >= 2 {
-			return true
+			if len(rSub) >= 4 || strings.HasPrefix(full, sub) || strings.HasSuffix(full, sub) {
+				return true
+			}
+			accounted := len(rSub)
+			for _, a := range artistVariants {
+				if normA := normalizeText(a); normA != "" && strings.Contains(full, normA) {
+					accounted += len([]rune(normA))
+				}
+			}
+			if float64(accounted)/float64(len(rFull)) >= 0.35 {
+				return true
+			}
 		}
 		accounted := len(rSub)
 		for _, a := range artistVariants {

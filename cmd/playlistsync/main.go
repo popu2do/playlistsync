@@ -30,6 +30,7 @@ var (
 	illegalPathChars           = regexp.MustCompile(`[\\/:*?"<>|\x00-\x1f]`)
 	ytVideoIDRegex             = regexp.MustCompile(`^[a-zA-Z0-9_-]{11}$`)
 	spTrackIDRegex             = regexp.MustCompile(`^[a-zA-Z0-9]{22}$`)
+	customIDRegex              = regexp.MustCompile(`^[a-zA-Z0-9_-]{10,64}$`)
 	isTerminalFunc             = func() bool {
 		stat, err := os.Stdin.Stat()
 		if err != nil {
@@ -70,6 +71,15 @@ func extractTargetID(input string) (string, bool) {
 			if ytVideoIDRegex.MatchString(v) {
 				return v, true
 			}
+			parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+			for i, p := range parts {
+				if (p == "shorts" || p == "v" || p == "embed") && i+1 < len(parts) {
+					id := strings.Split(parts[i+1], "?")[0]
+					if ytVideoIDRegex.MatchString(id) {
+						return id, true
+					}
+				}
+			}
 		}
 		if strings.Contains(u.Host, "youtu.be") {
 			parts := strings.Split(strings.Trim(u.Path, "/"), "/")
@@ -88,6 +98,11 @@ func extractTargetID(input string) (string, bool) {
 				}
 			}
 		}
+	}
+
+	// 4. Custom/Mock target track ID fallback
+	if customIDRegex.MatchString(raw) {
+		return raw, true
 	}
 
 	return "", false

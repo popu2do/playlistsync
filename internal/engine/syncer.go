@@ -677,8 +677,30 @@ func (s *Syncer) runSyncYouTubeToSpotify() (*model.SyncResult, error) {
 	// Safe Pruning: CleanExtra executed AFTER adding new tracks and re-fetching destination state
 	var removedList []model.RemovedTrack
 	if s.cfg.CleanExtra {
+		// Build protected ID set to ensure reviewed and matched additions are never accidentally pruned
+		protectedIDs := make(map[string]bool)
+		for _, m := range matchedTracks {
+			if m.TargetTrackID != "" {
+				protectedIDs[m.TargetTrackID] = true
+			}
+		}
+		for _, r := range spReviewOutcome.ReviewedAdditions {
+			if r.TargetTrackID != "" {
+				protectedIDs[r.TargetTrackID] = true
+			}
+		}
+		for _, uri := range toAddURIs {
+			id := strings.TrimPrefix(uri, "spotify:track:")
+			if id != "" {
+				protectedIDs[id] = true
+			}
+		}
+
 		var extraTracks []model.SpotifyTrack
 		for _, st := range finalPl.Tracks {
+			if protectedIDs[st.ID] || (st.SpotifyURI != "" && protectedIDs[st.SpotifyURI]) {
+				continue
+			}
 			matched := false
 			for _, yt := range ytmPlaylist.Tracks {
 				if CalculateTrackScore(st.Title, st.Artists, st.Duration, yt.Title, yt.Artists, yt.Duration) >= ConfidenceThreshold {

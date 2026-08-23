@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -81,7 +82,9 @@ func writeRestrictedJSON(path string, v any) error {
 		return err
 	}
 
-	_ = os.Remove(cleanPath)
+	if runtime.GOOS == "windows" {
+		_ = os.Remove(cleanPath)
+	}
 	if err := os.Rename(tmpPath, cleanPath); err != nil {
 		return fmt.Errorf("atomic save credentials: %w", err)
 	}

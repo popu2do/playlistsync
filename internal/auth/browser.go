@@ -101,15 +101,12 @@ func closeBrowserGracefully(cmd *exec.Cmd, port int) {
 		_ = closeCDPBrowser(port)
 	}
 
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case <-done:
-		return
-	case <-time.After(1500 * time.Millisecond):
+	// Give the browser process up to 1.5 seconds to exit gracefully
+	for i := 0; i < 15; i++ {
+		if cmd.ProcessState != nil {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	killProcessTree(cmd)

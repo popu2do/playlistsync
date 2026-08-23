@@ -195,12 +195,13 @@ func (c *Client) GetPlaylist(playlistID string) (*model.YTMPlaylist, error) {
 		contPayload := clientContext("zh-CN", "US")
 		contPayload["continuation"] = continuation
 
-		// Innertube continuation browse: continuation parameter must be passed in query string and/or body
+		// Innertube continuation browse: continuation parameter must be URL-escaped and passed in query string and/or body
+		escapedToken := url.QueryEscape(continuation)
 		var endpointURL string
 		if strings.Contains(EndpointBrowse, "?") {
-			endpointURL = fmt.Sprintf("%s&continuation=%s&ctoken=%s", EndpointBrowse, continuation, continuation)
+			endpointURL = fmt.Sprintf("%s&continuation=%s&ctoken=%s", EndpointBrowse, escapedToken, escapedToken)
 		} else {
-			endpointURL = fmt.Sprintf("%s?continuation=%s&ctoken=%s", EndpointBrowse, continuation, continuation)
+			endpointURL = fmt.Sprintf("%s?continuation=%s&ctoken=%s", EndpointBrowse, escapedToken, escapedToken)
 		}
 		contResp, err := c.post(endpointURL, contPayload)
 		if err != nil {
