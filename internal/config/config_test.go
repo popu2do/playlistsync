@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -126,51 +125,6 @@ func TestConfig_SetOutputDirAndAuthDir(t *testing.T) {
 	}
 }
 
-func TestConfig_PathNamingHelpers(t *testing.T) {
-	cfg := NewDefaultConfig()
-	cfg.SetOutputDir("custom_out")
-
-	plPath := cfg.GetPlaylistPath("My Rock Playlist")
-	if !strings.HasSuffix(plPath, "spotify_my rock playlist_source.json") || !strings.HasPrefix(plPath, "custom_out") {
-		t.Errorf("unexpected playlist path: %s", plPath)
-	}
-
-	spSource := cfg.GetSpotifySourcePath("My Rock Playlist")
-	if !strings.HasSuffix(spSource, "spotify_my rock playlist_source.json") {
-		t.Errorf("unexpected Spotify source path: %s", spSource)
-	}
-
-	ytmSource := cfg.GetYTMSourcePath("My Rock Playlist")
-	if !strings.HasSuffix(ytmSource, "ytmusic_my rock playlist_source.json") {
-		t.Errorf("unexpected YTM source path: %s", ytmSource)
-	}
-
-	ytmRes := cfg.GetYTMResultPath("My Rock Playlist")
-	if !strings.HasSuffix(ytmRes, "spotify_to_ytmusic_my rock playlist_result.json") || !strings.HasPrefix(ytmRes, "custom_out") {
-		t.Errorf("unexpected YTM result path: %s", ytmRes)
-	}
-
-	ytmRep := cfg.GetYTMReportPath("My Rock Playlist")
-	if !strings.HasSuffix(ytmRep, "spotify_to_ytmusic_my rock playlist_report.json") || !strings.HasPrefix(ytmRep, "custom_out") {
-		t.Errorf("unexpected YTM report path: %s", ytmRep)
-	}
-
-	spRes := cfg.GetSpotifyResultPath("My Rock Playlist")
-	if !strings.HasSuffix(spRes, "ytmusic_to_spotify_my rock playlist_result.json") || !strings.HasPrefix(spRes, "custom_out") {
-		t.Errorf("unexpected Spotify result path: %s", spRes)
-	}
-
-	spRep := cfg.GetSpotifyReportPath("My Rock Playlist")
-	if !strings.HasSuffix(spRep, "ytmusic_to_spotify_my rock playlist_report.json") || !strings.HasPrefix(spRep, "custom_out") {
-		t.Errorf("unexpected Spotify report path: %s", spRep)
-	}
-
-	dirRes := cfg.GetSyncResultPath("spotify", "youtube-music", "rock")
-	if !strings.HasSuffix(dirRes, "spotify_to_youtube-music_rock_result.json") {
-		t.Errorf("unexpected directional result path: %s", dirRes)
-	}
-}
-
 func TestGlobalConfigHelpers(t *testing.T) {
 	ResetGlobalConfig()
 	origOut := GetOutputDir()
@@ -186,6 +140,10 @@ func TestGlobalConfigHelpers(t *testing.T) {
 	SetAuthDir("new_global_auth")
 	if GetAuthDir() != "new_global_auth" {
 		t.Errorf("expected new_global_auth, got %s", GetAuthDir())
+	}
+
+	if GetConfidenceScore() != DefaultConfidenceScore {
+		t.Errorf("expected confidence score %d, got %d", DefaultConfidenceScore, GetConfidenceScore())
 	}
 
 	ResetGlobalConfig()

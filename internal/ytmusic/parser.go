@@ -47,8 +47,34 @@ func parsePlaylistResponse(body []byte) (*model.YTMPlaylist, string, error) {
 		continuationToken = extractTracksFromContinuation(continuationContents, pl)
 	}
 
+	// Modern Innertube responses return continuation items in onResponseReceivedActions
+	if actions, ok := raw["onResponseReceivedActions"].([]interface{}); ok {
+		if token := extractTracksFromActions(actions, pl); token != "" {
+			continuationToken = token
+		}
+	}
+
 	pl.TrackCount = len(pl.Tracks)
 	return pl, continuationToken, nil
+}
+
+func extractTracksFromActions(actions []interface{}, pl *model.YTMPlaylist) string {
+	var nextToken string
+	for _, act := range actions {
+		actMap, ok := act.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		appendAction, ok := actMap["appendContinuationItemsAction"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		items, _ := appendAction["continuationItems"].([]interface{})
+		if token := extractShelfItems(items, nil, pl); token != "" {
+			nextToken = token
+		}
+	}
+	return nextToken
 }
 
 func extractHeaderInfo(header map[string]interface{}, pl *model.YTMPlaylist) {
@@ -238,7 +264,6 @@ type runNode struct {
 	pageType string
 	browseID string
 	videoID  string
-	hasNav   bool
 }
 
 func parseRunNode(rMap map[string]interface{}) runNode {
@@ -250,7 +275,6 @@ func parseRunNode(rMap map[string]interface{}) runNode {
 	if !ok {
 		return node
 	}
-	node.hasNav = true
 
 	if watch, ok := nav["watchEndpoint"].(map[string]interface{}); ok {
 		if vID, ok := watch["videoId"].(string); ok {
@@ -270,14 +294,24 @@ func parseRunNode(rMap map[string]interface{}) runNode {
 }
 
 func extractRunNodesFromColumn(colMap map[string]interface{}, rendererKey string) []runNode {
-	runs, ok := getNavSlice(colMap, rendererKey, "text", "runs")
-	if !ok {
-		return nil
+	target := colMap
+	if inner, ok := colMap[rendererKey].(map[string]interface{}); ok {
+		target = inner
 	}
 	var results []runNode
-	for _, rItem := range runs {
-		if rMap, ok := rItem.(map[string]interface{}); ok {
-			results = append(results, parseRunNode(rMap))
+	if runs, ok := getNavSlice(target, "text", "runs"); ok {
+		for _, rItem := range runs {
+			if rMap, ok := rItem.(map[string]interface{}); ok {
+				results = append(results, parseRunNode(rMap))
+			}
+		}
+	}
+	if len(results) == 0 {
+		// Fallback for simpleText representations (common in duration & search items)
+		if st := getNavString(target, "text", "simpleText"); st != "" {
+			results = append(results, runNode{text: st})
+		} else if st := getNavString(target, "simpleText"); st != "" {
+			results = append(results, runNode{text: st})
 		}
 	}
 	return results
@@ -420,13 +454,18 @@ func parseFixedColumns(fixedCols []interface{}, track *model.YTMTrack) {
 	if len(fixedCols) == 0 {
 		return
 	}
-	if fcol0, ok := fixedCols[0].(map[string]interface{}); ok {
-		nodes := extractRunNodesFromColumn(fcol0, "musicResponsiveListItemFixedColumnRenderer")
-		for _, n := range nodes {
-			t := strings.TrimSpace(n.text)
-			if dur := extractDurationText(t); dur != "" {
-				track.Duration = dur
-				break
+	for _, col := range fixedCols {
+		if fcol, ok := col.(map[string]interface{}); ok {
+			nodes := extractRunNodesFromColumn(fcol, "musicResponsiveListItemFixedColumnRenderer")
+			if len(nodes) == 0 {
+				nodes = extractRunNodesFromColumn(fcol, "musicResponsiveListItemFlexColumnRenderer")
+			}
+			for _, n := range nodes {
+				t := strings.TrimSpace(n.text)
+				if dur := extractDurationText(t); dur != "" {
+					track.Duration = dur
+					return
+				}
 			}
 		}
 	}

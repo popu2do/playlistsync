@@ -76,7 +76,6 @@ func TestYTMModel_JSON(t *testing.T) {
 		ID:          "PLtest123",
 		Title:       "YTM Test Playlist",
 		Description: "Playlist Description",
-		Privacy:     "PRIVATE",
 		TrackCount:  1,
 		Tracks:      []model.YTMTrack{ytTrack},
 	}
@@ -99,11 +98,10 @@ func TestYTMModel_JSON(t *testing.T) {
 	}
 
 	searchRes := model.YTMSearchResult{
-		VideoID:    "vid123",
-		Title:      "Search Song",
-		Artists:    []string{"Artist A", "Artist B"},
-		ResultType: "SONG",
-		Score:      95,
+		VideoID:  "vid123",
+		Title:    "Search Song",
+		Artists:  []string{"Artist A", "Artist B"},
+		Score:    95,
 	}
 	sData, err := json.Marshal(searchRes)
 	if err != nil {
@@ -115,24 +113,6 @@ func TestYTMModel_JSON(t *testing.T) {
 	}
 	if decSearch.VideoID != "vid123" || decSearch.Score != 95 {
 		t.Errorf("search result mismatch: %+v", decSearch)
-	}
-
-	editAction := model.YTMEditAction{
-		Action:         "ACTION_ADD_VIDEO",
-		AddedVideoID:   "vidAdd",
-		RemovedVideoID: "vidRem",
-		SetVideoID:     "set1",
-	}
-	eData, err := json.Marshal(editAction)
-	if err != nil {
-		t.Fatalf("failed to marshal YTMEditAction: %v", err)
-	}
-	var decAction model.YTMEditAction
-	if err := json.Unmarshal(eData, &decAction); err != nil {
-		t.Fatalf("failed to unmarshal YTMEditAction: %v", err)
-	}
-	if decAction.Action != "ACTION_ADD_VIDEO" || decAction.AddedVideoID != "vidAdd" {
-		t.Errorf("edit action mismatch: %+v", decAction)
 	}
 }
 

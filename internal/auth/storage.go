@@ -99,11 +99,6 @@ func SaveCookie(path string, cookie string) error {
 	})
 }
 
-// SaveAuthMap saves an arbitrary auth map to path with restricted file permissions (0600)
-func SaveAuthMap(path string, authMap map[string]string) error {
-	return writeRestrictedJSON(path, authMap)
-}
-
 // SaveRawCookieMap saves headers mapping with restricted file permissions (0600)
 func SaveRawCookieMap(path string, cookie string) error {
 	if path == "" {
@@ -113,24 +108,4 @@ func SaveRawCookieMap(path string, cookie string) error {
 		"Cookie":     cookie,
 		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
 	})
-}
-
-// LoadSpotifyCredentials loads Spotify cookie credentials from disk
-func LoadSpotifyCredentials(path string) (string, error) {
-	return LoadCookie(path)
-}
-
-// SaveSpotifyCredentials writes Spotify cookie credentials to disk
-func SaveSpotifyCredentials(path string, cookie string) error {
-	return SaveCookie(path, cookie)
-}
-
-// LoadYTMCredentials loads YouTube Music credentials from disk
-func LoadYTMCredentials(path string) (string, error) {
-	return LoadCookie(path)
-}
-
-// SaveYTMCredentials writes YouTube Music cookie credentials to disk
-func SaveYTMCredentials(path string, cookie string) error {
-	return SaveRawCookieMap(path, cookie)
 }

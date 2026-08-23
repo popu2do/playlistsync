@@ -18,7 +18,6 @@ import (
 var (
 	spotifyTokenEndpoint = "https://open.spotify.com/api/token"
 	spotifyMeEndpoint    = "https://api.spotify.com/v1/me"
-	spotifyWebEndpoint   = "https://open.spotify.com/"
 	ytmBrowseEndpoint    = "https://music.youtube.com/youtubei/v1/browse?prettyPrint=false"
 )
 
@@ -37,11 +36,9 @@ func newAuthHTTPClient(proxyURL string) (*http.Client, func()) {
 func SetEndpointsForTesting(spToken, spMe, ytmBrowse string) func() {
 	origToken := spotifyTokenEndpoint
 	origMe := spotifyMeEndpoint
-	origWeb := spotifyWebEndpoint
 	origYTM := ytmBrowseEndpoint
 	if spToken != "" {
 		spotifyTokenEndpoint = spToken
-		spotifyWebEndpoint = spToken + "/web"
 	}
 	if spMe != "" {
 		spotifyMeEndpoint = spMe
@@ -52,7 +49,6 @@ func SetEndpointsForTesting(spToken, spMe, ytmBrowse string) func() {
 	return func() {
 		spotifyTokenEndpoint = origToken
 		spotifyMeEndpoint = origMe
-		spotifyWebEndpoint = origWeb
 		ytmBrowseEndpoint = origYTM
 	}
 }
@@ -315,7 +311,6 @@ type ytmAuthPayload struct {
 			} `json:"title"`
 		} `json:"musicHeaderRenderer"`
 	} `json:"header"`
-	Contents map[string]any `json:"contents"`
 }
 
 func parseYTMAuthResponse(body []byte) (bool, string, error) {

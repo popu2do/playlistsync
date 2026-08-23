@@ -1,13 +1,10 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
-	"time"
 )
 
 // Default paths and values
@@ -16,11 +13,6 @@ const (
 	DefaultAuthDirName     = "auth"
 	DefaultSpotifyAuthName = "spotify_credentials.json"
 	DefaultYTMAuthName     = "ytmusic_credentials.json"
-	DefaultCDPPort         = 9222
-	DefaultTimeout         = 30 * time.Second
-	DefaultLoginTimeout    = 3 * time.Minute
-	DefaultBatchDelay      = 300 * time.Millisecond
-	DefaultBatchSize       = 20
 	DefaultConfidenceScore = 70
 )
 
@@ -32,16 +24,13 @@ var (
 
 // AppConfig represents global application configuration
 type AppConfig struct {
-	OutputDir       string        `json:"outputDir"`
-	AuthDir         string        `json:"authDir"`
-	SpotifyAuthPath string        `json:"spotifyAuthPath"`
-	YTMAuthPath     string        `json:"ytmAuthPath"`
-	ProxyURL        string        `json:"proxyUrl"`
-	CleanExtra      bool          `json:"cleanExtra"`
-	ConfidenceScore int           `json:"confidenceScore"`
-	RequestTimeout  time.Duration `json:"requestTimeout"`
-	BatchDelay      time.Duration `json:"batchDelay"`
-	BatchSize       int           `json:"batchSize"`
+	OutputDir       string `json:"outputDir"`
+	AuthDir         string `json:"authDir"`
+	SpotifyAuthPath string `json:"spotifyAuthPath"`
+	YTMAuthPath     string `json:"ytmAuthPath"`
+	ProxyURL        string `json:"proxyUrl"`
+	CleanExtra      bool   `json:"cleanExtra"`
+	ConfidenceScore int    `json:"confidenceScore"`
 }
 
 func envOrDefault(key, fallback string) string {
@@ -88,9 +77,6 @@ func NewDefaultConfig() *AppConfig {
 		ProxyURL:        proxyURL,
 		CleanExtra:      cleanExtra,
 		ConfidenceScore: confidenceScore,
-		RequestTimeout:  DefaultTimeout,
-		BatchDelay:      DefaultBatchDelay,
-		BatchSize:       DefaultBatchSize,
 	}
 }
 
@@ -126,104 +112,6 @@ func (c *AppConfig) GetSpotifyProfileDir() string {
 // GetYTMProfileDir returns browser user-data-dir for YouTube Music login
 func (c *AppConfig) GetYTMProfileDir() string {
 	return filepath.Join(c.AuthDir, ".chrome_ytmusic")
-}
-
-func (c *AppConfig) formatPath(platform, name, kind string) string {
-	slug := strings.ToLower(strings.TrimSpace(name))
-	plat := strings.ToLower(strings.TrimSpace(platform))
-	if plat == "" {
-		plat = "spotify"
-	}
-	if kind == "source" || kind == "playlist" {
-		return filepath.Join(c.OutputDir, fmt.Sprintf("%s_%s_source.json", plat, slug))
-	}
-	return filepath.Join(c.OutputDir, fmt.Sprintf("%s_%s_%s.json", plat, slug, kind))
-}
-
-// GetSourcePath returns the standardized source playlist JSON path for a platform and playlist name
-func (c *AppConfig) GetSourcePath(platform, name string) string {
-	return c.formatPath(platform, name, "source")
-}
-
-// GetPlaylistPath returns the standardized source playlist JSON path for a playlist name (defaults to spotify)
-func (c *AppConfig) GetPlaylistPath(name string) string {
-	return c.GetSourcePath("spotify", name)
-}
-
-// GetSpotifySourcePath returns standard Spotify source playlist path
-func (c *AppConfig) GetSpotifySourcePath(name string) string {
-	return c.GetSourcePath("spotify", name)
-}
-
-// GetYTMSourcePath returns standard YouTube Music source playlist path
-func (c *AppConfig) GetYTMSourcePath(name string) string {
-	return c.GetSourcePath("ytmusic", name)
-}
-
-// GetSyncResultPath returns the directional result JSON path across platforms
-func (c *AppConfig) GetSyncResultPath(fromPlatform, toPlatform, name string) string {
-	slug := strings.ToLower(strings.TrimSpace(name))
-	from := strings.ToLower(strings.TrimSpace(fromPlatform))
-	to := strings.ToLower(strings.TrimSpace(toPlatform))
-	if from == "" {
-		from = "spotify"
-	}
-	if to == "" {
-		to = "ytmusic"
-	}
-	return filepath.Join(c.OutputDir, fmt.Sprintf("%s_to_%s_%s_result.json", from, to, slug))
-}
-
-// GetSyncReportPath returns the directional report JSON path across platforms
-func (c *AppConfig) GetSyncReportPath(fromPlatform, toPlatform, name string) string {
-	slug := strings.ToLower(strings.TrimSpace(name))
-	from := strings.ToLower(strings.TrimSpace(fromPlatform))
-	to := strings.ToLower(strings.TrimSpace(toPlatform))
-	if from == "" {
-		from = "spotify"
-	}
-	if to == "" {
-		to = "ytmusic"
-	}
-	return filepath.Join(c.OutputDir, fmt.Sprintf("%s_to_%s_%s_report.json", from, to, slug))
-}
-
-// GetResultPath returns the standardized result JSON path for a target platform and playlist name
-func (c *AppConfig) GetResultPath(platform, name string) string {
-	plat := strings.ToLower(strings.TrimSpace(platform))
-	if plat == "spotify" {
-		return c.GetSyncResultPath("ytmusic", "spotify", name)
-	}
-	return c.GetSyncResultPath("spotify", "ytmusic", name)
-}
-
-// GetReportPath returns the standardized report JSON path for a target platform and playlist name
-func (c *AppConfig) GetReportPath(platform, name string) string {
-	plat := strings.ToLower(strings.TrimSpace(platform))
-	if plat == "spotify" {
-		return c.GetSyncReportPath("ytmusic", "spotify", name)
-	}
-	return c.GetSyncReportPath("spotify", "ytmusic", name)
-}
-
-// GetSpotifyResultPath returns directional result path with Spotify as destination (from YouTube Music)
-func (c *AppConfig) GetSpotifyResultPath(name string) string {
-	return c.GetSyncResultPath("ytmusic", "spotify", name)
-}
-
-// GetSpotifyReportPath returns directional report path with Spotify as destination (from YouTube Music)
-func (c *AppConfig) GetSpotifyReportPath(name string) string {
-	return c.GetSyncReportPath("ytmusic", "spotify", name)
-}
-
-// GetYTMResultPath returns directional result path with YouTube Music as destination (from Spotify)
-func (c *AppConfig) GetYTMResultPath(name string) string {
-	return c.GetSyncResultPath("spotify", "ytmusic", name)
-}
-
-// GetYTMReportPath returns directional report path with YouTube Music as destination (from Spotify)
-func (c *AppConfig) GetYTMReportPath(name string) string {
-	return c.GetSyncReportPath("spotify", "ytmusic", name)
 }
 
 // Global accessor and modifier helpers
@@ -286,6 +174,16 @@ func GetYTMAuthPath() string {
 		return filepath.Join(GetAuthDir(), DefaultYTMAuthName)
 	}
 	return GlobalConfig.YTMAuthPath
+}
+
+// GetConfidenceScore returns the configured confidence threshold
+func GetConfidenceScore() int {
+	configMu.RLock()
+	defer configMu.RUnlock()
+	if GlobalConfig == nil || GlobalConfig.ConfidenceScore <= 0 {
+		return DefaultConfidenceScore
+	}
+	return GlobalConfig.ConfidenceScore
 }
 
 // ResetGlobalConfig re-initializes GlobalConfig from defaults and environment variables

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"playlistsync/internal/auth"
+	"playlistsync/internal/engine"
 	"playlistsync/internal/model"
 	"playlistsync/internal/spotify"
 	"playlistsync/internal/ytmusic"
@@ -574,6 +575,140 @@ func TestRun_CustomOutputDirFlag(t *testing.T) {
 	t.Run("Report with --output-dir", func(t *testing.T) {
 		if code := run([]string{"report", "custom_pl", "--output-dir", tempDir}); code != 0 {
 			t.Errorf("expected exit code 0 for report with custom output-dir, got %d", code)
+		}
+	})
+}
+
+func TestExtractTargetID(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantID   string
+		wantOK   bool
+	}{
+		{"Empty string", "", "", false},
+		{"Whitespace only", "   \t\n", "", false},
+		{"Raw 11-char YouTube ID", "dQw4w9WgXcQ", "dQw4w9WgXcQ", true},
+		{"Raw 22-char Spotify ID", "4cOdK2wGLETKBW3PvgPWqT", "4cOdK2wGLETKBW3PvgPWqT", true},
+		{"Spotify URI format", "spotify:track:4cOdK2wGLETKBW3PvgPWqT", "4cOdK2wGLETKBW3PvgPWqT", true},
+		{"Invalid Spotify URI", "spotify:track:short_invalid", "", false},
+		{"YouTube standard URL", "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ", true},
+		{"YouTube URL with extra query params", "https://www.youtube.com/watch?v=dQw4w9WgXcQ&feature=emb_title&t=10s", "dQw4w9WgXcQ", true},
+		{"YouTube Music URL", "https://music.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ", true},
+		{"YouTube short link", "https://youtu.be/dQw4w9WgXcQ", "dQw4w9WgXcQ", true},
+		{"YouTube short link with query", "https://youtu.be/dQw4w9WgXcQ?si=abc_123", "dQw4w9WgXcQ", true},
+		{"Spotify track URL", "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT", "4cOdK2wGLETKBW3PvgPWqT", true},
+		{"Spotify track URL with query params", "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT?si=abc&context=spotify", "4cOdK2wGLETKBW3PvgPWqT", true},
+		{"Fallback alphanumeric ID", "custom_id_12345", "custom_id_12345", true},
+		{"Invalid URL without track", "https://open.spotify.com/album/4cOdK2wGLETKBW3PvgPWqT", "", false},
+		{"Invalid URL missing video ID", "https://www.youtube.com/watch", "", false},
+		{"Too short string", "abc", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotID, gotOK := extractTargetID(tt.input)
+			if gotOK != tt.wantOK || gotID != tt.wantID {
+				t.Errorf("extractTargetID(%q) = (%q, %v); want (%q, %v)", tt.input, gotID, gotOK, tt.wantID, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestPromptReview_Scenarios(t *testing.T) {
+	origStdin := stdinReader
+	defer func() { stdinReader = origStdin }()
+
+	testItem := engine.ReviewItem{
+		SourceIndex:    1,
+		SourceTitle:    "Test Song",
+		SourceArtists:  []string{"Artist A"},
+		SourceDuration: "3:30",
+		SourcePlatform: "spotify",
+		TargetPlatform: "youtube-music",
+		Options: []engine.ReviewOption{
+			{TargetID: "vid_1", Title: "Candidate 1", Artists: []string{"Artist A"}, Duration: "3:30", Score: 65, TargetURL: "https://music.youtube.com/watch?v=vid_1"},
+			{TargetID: "vid_2", Title: "Candidate 2", Artists: []string{"Artist B"}, Duration: "3:40", Score: 55, TargetURL: "https://music.youtube.com/watch?v=vid_2"},
+		},
+	}
+
+	t.Run("Select option 1 with CRLF", func(t *testing.T) {
+		stdinReader = strings.NewReader("1\r\n")
+		id, confirmed, abort := promptReview(testItem)
+		if !confirmed || abort || id != "vid_1" {
+			t.Errorf("expected ('vid_1', true, false), got (%q, %v, %v)", id, confirmed, abort)
+		}
+	})
+
+	t.Run("Default skip on empty enter", func(t *testing.T) {
+		stdinReader = strings.NewReader("\n")
+		id, confirmed, abort := promptReview(testItem)
+		if confirmed || abort || id != "" {
+			t.Errorf("expected ('', false, false), got (%q, %v, %v)", id, confirmed, abort)
+		}
+	})
+
+	t.Run("Explicit skip with 's'", func(t *testing.T) {
+		stdinReader = strings.NewReader("s\n")
+		id, confirmed, abort := promptReview(testItem)
+		if confirmed || abort || id != "" {
+			t.Errorf("expected ('', false, false), got (%q, %v, %v)", id, confirmed, abort)
+		}
+	})
+
+	t.Run("Abort all with 'a'", func(t *testing.T) {
+		stdinReader = strings.NewReader("a\n")
+		id, confirmed, abort := promptReview(testItem)
+		if confirmed || !abort || id != "" {
+			t.Errorf("expected ('', false, true), got (%q, %v, %v)", id, confirmed, abort)
+		}
+	})
+
+	t.Run("Abort all with 'quit'", func(t *testing.T) {
+		stdinReader = strings.NewReader("quit\n")
+		id, confirmed, abort := promptReview(testItem)
+		if confirmed || !abort || id != "" {
+			t.Errorf("expected ('', false, true), got (%q, %v, %v)", id, confirmed, abort)
+		}
+	})
+
+	t.Run("Custom ID workflow success", func(t *testing.T) {
+		stdinReader = strings.NewReader("c\nhttps://youtu.be/dQw4w9WgXcQ\n")
+		id, confirmed, abort := promptReview(testItem)
+		if !confirmed || abort || id != "dQw4w9WgXcQ" {
+			t.Errorf("expected ('dQw4w9WgXcQ', true, false), got (%q, %v, %v)", id, confirmed, abort)
+		}
+	})
+
+	t.Run("Custom ID cancelled with back then select candidate 2", func(t *testing.T) {
+		stdinReader = strings.NewReader("c\nback\n2\n")
+		id, confirmed, abort := promptReview(testItem)
+		if !confirmed || abort || id != "vid_2" {
+			t.Errorf("expected ('vid_2', true, false), got (%q, %v, %v)", id, confirmed, abort)
+		}
+	})
+
+	t.Run("Invalid input recovery", func(t *testing.T) {
+		stdinReader = strings.NewReader("invalid_choice\n99\n1\n")
+		id, confirmed, abort := promptReview(testItem)
+		if !confirmed || abort || id != "vid_1" {
+			t.Errorf("expected ('vid_1', true, false), got (%q, %v, %v)", id, confirmed, abort)
+		}
+	})
+
+	t.Run("EOF on stdin aborts gracefully", func(t *testing.T) {
+		stdinReader = strings.NewReader("")
+		id, confirmed, abort := promptReview(testItem)
+		if confirmed || !abort || id != "" {
+			t.Errorf("expected ('', false, true) on EOF, got (%q, %v, %v)", id, confirmed, abort)
+		}
+	})
+
+	t.Run("Custom ID EOF aborts gracefully", func(t *testing.T) {
+		stdinReader = strings.NewReader("c\n")
+		id, confirmed, abort := promptReview(testItem)
+		if confirmed || !abort || id != "" {
+			t.Errorf("expected ('', false, true) on Custom EOF, got (%q, %v, %v)", id, confirmed, abort)
 		}
 	})
 }

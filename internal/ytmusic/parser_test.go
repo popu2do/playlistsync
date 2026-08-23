@@ -184,6 +184,9 @@ func TestClient_EndToEndOperations(t *testing.T) {
 		case "/youtubei/v1/browse":
 			browseID, _ := body["browseId"].(string)
 			continuation, _ := body["continuation"].(string)
+			if continuation == "" {
+				continuation = r.URL.Query().Get("continuation")
+			}
 
 			if browseID == "VLPL_ERROR" {
 				w.WriteHeader(http.StatusNotFound)
@@ -1679,6 +1682,51 @@ func TestParser_HelperFunctions(t *testing.T) {
 		}
 		if len(pl.Tracks) != 1 || len(pl.Tracks[0].Artists) != 1 || pl.Tracks[0].Artists[0] != "!!!" {
 			t.Errorf("expected artist to be '!!!', got %+v", pl.Tracks)
+		}
+	})
+
+	t.Run("onResponseReceivedActionsContinuationAndSimpleTextDuration", func(t *testing.T) {
+		jsonPayload := []byte(`{
+			"onResponseReceivedActions": [{
+				"appendContinuationItemsAction": {
+					"continuationItems": [
+						{
+							"musicResponsiveListItemRenderer": {
+								"playlistItemData": {"videoId": "vid_action_1"},
+								"flexColumns": [
+									{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Action Track"}]}}},
+									{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Action Artist"}]}}}
+								],
+								"fixedColumns": [
+									{"musicResponsiveListItemFixedColumnRenderer": {"text": {"simpleText": "3:45"}}}
+								]
+							}
+						},
+						{
+							"continuationItemRenderer": {
+								"continuationEndpoint": {
+									"continuationCommand": {
+										"token": "next_action_token_999"
+									}
+								}
+							}
+						}
+					]
+				}
+			}]
+		}`)
+		pl, token, err := parsePlaylistResponse(jsonPayload)
+		if err != nil {
+			t.Fatalf("parsePlaylistResponse error: %v", err)
+		}
+		if len(pl.Tracks) != 1 {
+			t.Fatalf("expected 1 track, got %d", len(pl.Tracks))
+		}
+		if pl.Tracks[0].Duration != "3:45" {
+			t.Errorf("expected duration '3:45', got %q", pl.Tracks[0].Duration)
+		}
+		if token != "next_action_token_999" {
+			t.Errorf("expected continuation token 'next_action_token_999', got %q", token)
 		}
 	})
 }

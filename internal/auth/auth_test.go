@@ -363,6 +363,7 @@ func TestCheckAuthentication_And_FastPath(t *testing.T) {
 }
 
 func TestCDPLogin_ProcessExitDetection(t *testing.T) {
+	defer SetCDPStartupTimeoutForTesting(100 * time.Millisecond)()
 	tempDir := t.TempDir()
 	savePath := filepath.Join(tempDir, "auth.json")
 
@@ -435,6 +436,7 @@ func TestFindBrowserPath(t *testing.T) {
 }
 
 func TestLoginPlatform_CDPLogin(t *testing.T) {
+	defer SetCDPStartupTimeoutForTesting(100 * time.Millisecond)()
 	reset := SetBrowserLauncherForTesting(
 		func() (string, error) {
 			return "mock_browser", nil
@@ -879,22 +881,8 @@ func TestCDP_WebSocket_Operations(t *testing.T) {
 		}
 	})
 
-	t.Run("EvaluateCDPResult success", func(t *testing.T) {
-		val, err := EvaluateCDPResult(port, "test_eval", "1+1")
-		if err != nil {
-			t.Fatalf("EvaluateCDPResult failed: %v", err)
-		}
-		if val != "eval_output" {
-			t.Fatalf("expected 'eval_output', got %q", val)
-		}
-	})
-
 	t.Run("CDP Error response handling", func(t *testing.T) {
 		_, err := fetchCDPCookies(port, "test_error")
-		if err == nil {
-			t.Fatal("expected error from CDP error response")
-		}
-		_, err = EvaluateCDPResult(port, "test_error", "foo")
 		if err == nil {
 			t.Fatal("expected error from CDP error response")
 		}
@@ -904,10 +892,6 @@ func TestCDP_WebSocket_Operations(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // cancel immediately
 		_, err := fetchCDPCookiesWithContext(ctx, port, "test_cookies")
-		if err == nil {
-			t.Fatal("expected error on cancelled context")
-		}
-		_, err = EvaluateCDPResultWithContext(ctx, port, "test_eval", "1+1")
 		if err == nil {
 			t.Fatal("expected error on cancelled context")
 		}
@@ -982,6 +966,7 @@ func TestValidateSpotifyAuth_FileErrors(t *testing.T) {
 }
 
 func TestMockCDP_FullFlows(t *testing.T) {
+	defer SetCDPStartupTimeoutForTesting(100 * time.Millisecond)()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to listen tcp: %v", err)
@@ -1070,17 +1055,7 @@ func TestMockCDP_FullFlows(t *testing.T) {
 		}
 	})
 
-	t.Run("QueryAllCDPCookies success", func(t *testing.T) {
-		cookieHeader, err := QueryAllCDPCookies(port)
-		if err != nil {
-			t.Fatalf("QueryAllCDPCookies failed: %v", err)
-		}
-		if !strings.Contains(cookieHeader, "SAPISID=captured_sapisid") {
-			t.Errorf("expected SAPISID in cookieHeader, got %q", cookieHeader)
-		}
-	})
-
-	t.Run("StartCDPLogin and StartCDPLoginWithContext with mock browser", func(t *testing.T) {
+	t.Run("StartCDPLoginWithContext with mock browser", func(t *testing.T) {
 		tempDir := t.TempDir()
 		origPort := cdpPort
 		defer func() {
@@ -1163,62 +1138,7 @@ func TestMockCDP_FullFlows(t *testing.T) {
 		if !strings.Contains(ytmCookie, "SAPISID=captured_sapisid") {
 			t.Errorf("YTM cookie was not captured: %q", ytmCookie)
 		}
-
-		// StartCDPLogin wrapper
-		spSavePath2 := filepath.Join(tempDir, "spotify_captured_2.json")
-		if err := StartCDPLogin("https://open.spotify.com", spSavePath2, "sp_dc"); err != nil {
-			t.Fatalf("StartCDPLogin wrapper failed: %v", err)
-		}
 	})
-}
-
-func TestValidateCredentials_Facade(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"accessToken": "mock_token_facade",
-			"isAnonymous": false,
-			"username":    "FacadeUser",
-		})
-	}))
-	defer ts.Close()
-
-	resetEndpoints := SetEndpointsForTesting(ts.URL, "", "")
-	defer resetEndpoints()
-
-	tempDir := t.TempDir()
-	p := filepath.Join(tempDir, "sp.json")
-	_ = SaveSpotifyCredentials(p, "sp_dc=valid_facade_sp_dc_1234567890")
-
-	status, err := ValidateCredentials(PlatformSpotify, p, "")
-	if err != nil || !status.Authenticated {
-		t.Fatalf("ValidateCredentials failed: %v", err)
-	}
-	if status.User != "FacadeUser" {
-		t.Errorf("expected FacadeUser, got %s", status.User)
-	}
-}
-
-func TestCredentialHelpers_SpotifyAndYTM(t *testing.T) {
-	tempDir := t.TempDir()
-
-	spPath := filepath.Join(tempDir, "sp_helper.json")
-	if err := SaveSpotifyCredentials(spPath, "sp_dc=sp_token_1234567890"); err != nil {
-		t.Fatalf("SaveSpotifyCredentials failed: %v", err)
-	}
-	loadedSP, err := LoadSpotifyCredentials(spPath)
-	if err != nil || loadedSP != "sp_dc=sp_token_1234567890" {
-		t.Fatalf("LoadSpotifyCredentials failed: %v, got %q", err, loadedSP)
-	}
-
-	ytmPath := filepath.Join(tempDir, "ytm_helper.json")
-	if err := SaveYTMCredentials(ytmPath, "SAPISID=ytm_token_123"); err != nil {
-		t.Fatalf("SaveYTMCredentials failed: %v", err)
-	}
-	loadedYTM, err := LoadYTMCredentials(ytmPath)
-	if err != nil || !strings.Contains(loadedYTM, "SAPISID=ytm_token_123") {
-		t.Fatalf("LoadYTMCredentials failed: %v, got %q", err, loadedYTM)
-	}
 }
 
 func TestGetSpotifyAccessToken(t *testing.T) {
@@ -1326,119 +1246,5 @@ func TestGetProfileDir(t *testing.T) {
 	ytmDir := GetProfileDir(PlatformYouTube, "output/auth/ytmusic_credentials.json")
 	if !strings.Contains(ytmDir, ".chrome_ytmusic") {
 		t.Errorf("expected .chrome_ytmusic in path, got: %s", ytmDir)
-	}
-}
-
-func TestRefreshSpotifyTokenHeadless_Mock(t *testing.T) {
-	tempDir := t.TempDir()
-	authPath := filepath.Join(tempDir, "spotify_credentials.json")
-	profileDir := filepath.Join(tempDir, ".chrome_spotify")
-	_ = os.MkdirAll(profileDir, 0700)
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to listen tcp: %v", err)
-	}
-	defer ln.Close()
-
-	port := ln.Addr().(*net.TCPAddr).Port
-
-	origPort := cdpPort
-	cdpPort = port
-	defer func() {
-		cdpPort = origPort
-	}()
-
-	var upgrader = websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/json/list", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		targetJSON := fmt.Sprintf(`[{"id": "page_sp", "type": "page", "url": "https://open.spotify.com/", "webSocketDebuggerUrl": "ws://127.0.0.1:%d/devtools/page/page_sp"}]`, port)
-		_, _ = w.Write([]byte(targetJSON))
-	})
-
-	mux.HandleFunc("/devtools/page/", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		for {
-			var msg map[string]interface{}
-			if err := conn.ReadJSON(&msg); err != nil {
-				return
-			}
-			method, _ := msg["method"].(string)
-			if method == "Runtime.evaluate" {
-				_ = conn.WriteJSON(map[string]interface{}{
-					"id": 2,
-					"result": map[string]interface{}{
-						"result": map[string]interface{}{
-							"type":  "string",
-							"value": "{\"accessToken\":\"headless_refreshed_token\",\"isAnonymous\":false}",
-						},
-					},
-				})
-			} else {
-				_ = conn.WriteJSON(map[string]interface{}{
-					"id": 1,
-					"result": map[string]interface{}{
-						"cookies": []map[string]string{
-							{"name": "sp_dc", "value": "headless_cookie"},
-						},
-					},
-				})
-			}
-		}
-	})
-
-	server := &http.Server{Handler: mux}
-	go func() { _ = server.Serve(ln) }()
-	defer server.Close()
-
-	spServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"display_name": "Headless User",
-			"id":           "headless_user_1",
-			"accessToken":  "headless_refreshed_token",
-			"isAnonymous":  false,
-		})
-	}))
-	defer spServer.Close()
-
-	_ = SaveCookie(authPath, "sp_dc=headless_cookie_val_123456789")
-
-	resetEndpoints := SetEndpointsForTesting(spServer.URL+"/token", spServer.URL+"/v1/me", "")
-	defer resetEndpoints()
-
-	resetLauncher := SetBrowserLauncherForTesting(
-		func() (string, error) {
-			return "mock_browser", nil
-		},
-		func(exe string, args []string) (*exec.Cmd, error) {
-			var cmd *exec.Cmd
-			if runtime.GOOS == "windows" {
-				cmd = exec.Command("ping", "127.0.0.1", "-n", "30")
-			} else {
-				cmd = exec.Command("sleep", "30")
-			}
-			if err := cmd.Start(); err != nil {
-				return nil, err
-			}
-			return cmd, nil
-		},
-	)
-	defer resetLauncher()
-
-	token, err := RefreshSpotifyTokenHeadless("", authPath)
-	if err != nil {
-		t.Fatalf("RefreshSpotifyTokenHeadless failed: %v", err)
-	}
-	if token != "headless_refreshed_token" {
-		t.Errorf("expected 'headless_refreshed_token', got %q", token)
 	}
 }

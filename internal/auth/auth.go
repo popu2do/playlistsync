@@ -11,12 +11,10 @@ import (
 )
 
 const (
-	DefaultSpotifyAuthPath   = "output/auth/spotify_credentials.json"
-	DefaultYTMAuthPath       = "output/auth/ytmusic_credentials.json"
-	DefaultSpotifyProfileDir = "output/auth/.chrome_spotify"
-	DefaultYTMProfileDir     = "output/auth/.chrome_ytmusic"
-	DefaultCDPPort           = 9222
-	DefaultLoginTimeout      = 3 * time.Minute
+	DefaultSpotifyAuthPath = "output/auth/spotify_credentials.json"
+	DefaultYTMAuthPath     = "output/auth/ytmusic_credentials.json"
+	DefaultCDPPort         = 9222
+	DefaultLoginTimeout    = 3 * time.Minute
 )
 
 // Platform represents supported music streaming platforms
@@ -159,11 +157,6 @@ func CheckAuthentication(platform Platform, authPath string, proxyURL string) (*
 	}
 }
 
-// ValidateCredentials is an alias for CheckAuthentication for high-level validation
-func ValidateCredentials(platform Platform, authPath string, proxyURL string) (*AuthStatus, error) {
-	return CheckAuthentication(platform, authPath, proxyURL)
-}
-
 // EnsureAuthenticated ensures valid credentials exist; if invalid or missing, triggers login flow automatically
 func EnsureAuthenticated(platform Platform, authPath string, proxyURL string) (*AuthStatus, error) {
 	norm := NormalizePlatform(string(platform))
@@ -286,13 +279,6 @@ func LoginPlatform(platform Platform, opts ...Option) (*AuthStatus, error) {
 	return status, nil
 }
 
-// StartCDPLogin launches an isolated browser session and captures credentials via CDP
-func StartCDPLogin(targetURL string, savePath string, targetCookieName string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultLoginTimeout)
-	defer cancel()
-	return StartCDPLoginWithContext(ctx, targetURL, savePath, targetCookieName, "")
-}
-
 // StartCDPLoginWithContext runs CDP login with process exit watcher and context management
 func StartCDPLoginWithContext(ctx context.Context, targetURL string, savePath string, targetCookieName string, proxyURL string) error {
 	browserExe, err := browserLookupFn()
@@ -348,7 +334,7 @@ func StartCDPLoginWithContext(ctx context.Context, targetURL string, savePath st
 
 	cdpEverConnected := false
 	failedCDPPolls := 0
-	startupDeadline := time.Now().Add(10 * time.Second)
+	startupDeadline := time.Now().Add(cdpStartupTimeout)
 	procExited := false
 	var procExitErr error
 
@@ -410,13 +396,4 @@ func StartCDPLoginWithContext(ctx context.Context, targetURL string, savePath st
 			}
 		}
 	}
-}
-
-// RefreshSpotifyTokenHeadless refreshes Spotify access token using stored credentials
-func RefreshSpotifyTokenHeadless(proxyURL string, authPath string) (string, error) {
-	cookie, err := LoadCookie(authPath)
-	if err != nil || cookie == "" {
-		return "", fmt.Errorf("no valid cookie stored")
-	}
-	return GetSpotifyAccessTokenFromCookie(cookie, proxyURL)
 }

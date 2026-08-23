@@ -14,7 +14,6 @@ type YTMPlaylist struct {
 	ID          string     `json:"id"`
 	Title       string     `json:"title"`
 	Description string     `json:"description,omitempty"`
-	Privacy     string     `json:"privacy,omitempty"`
 	TrackCount  int        `json:"trackCount"`
 	Tracks      []YTMTrack `json:"tracks"`
 }
@@ -23,23 +22,13 @@ type YTMPlaylist struct {
 type YTMPlaylistSummary struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
-	Count int    `json:"count,omitempty"`
 }
 
 // YTMSearchResult represents a candidate returned from YouTube Music search
 type YTMSearchResult struct {
-	VideoID    string   `json:"videoId"`
-	Title      string   `json:"title"`
-	Artists    []string `json:"artists"`
-	Duration   string   `json:"duration,omitempty"`
-	ResultType string   `json:"resultType"`
-	Score      int      `json:"score,omitempty"`
-}
-
-// YTMEditAction represents an add/remove action for YouTube Music playlist
-type YTMEditAction struct {
-	Action         string `json:"action"`
-	AddedVideoID   string `json:"addedVideoId,omitempty"`
-	RemovedVideoID string `json:"removedVideoId,omitempty"`
-	SetVideoID     string `json:"setVideoId,omitempty"`
+	VideoID  string   `json:"videoId"`
+	Title    string   `json:"title"`
+	Artists  []string `json:"artists"`
+	Duration string   `json:"duration,omitempty"`
+	Score    int      `json:"score,omitempty"`
 }

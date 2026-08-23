@@ -23,7 +23,6 @@ var (
 	EndpointEditPlaylist   = "https://music.youtube.com/youtubei/v1/browse/edit_playlist?prettyPrint=false"
 	EndpointSearch         = "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
 	EndpointCreatePlaylist = "https://music.youtube.com/youtubei/v1/playlist/create?prettyPrint=false"
-	EndpointDeletePlaylist = "https://music.youtube.com/youtubei/v1/playlist/delete?prettyPrint=false"
 )
 
 const (
@@ -196,7 +195,14 @@ func (c *Client) GetPlaylist(playlistID string) (*model.YTMPlaylist, error) {
 		contPayload := clientContext("zh-CN", "US")
 		contPayload["continuation"] = continuation
 
-		contResp, err := c.post(EndpointBrowse, contPayload)
+		// Innertube continuation browse: continuation parameter must be passed in query string and/or body
+		var endpointURL string
+		if strings.Contains(EndpointBrowse, "?") {
+			endpointURL = fmt.Sprintf("%s&continuation=%s&ctoken=%s", EndpointBrowse, continuation, continuation)
+		} else {
+			endpointURL = fmt.Sprintf("%s?continuation=%s&ctoken=%s", EndpointBrowse, continuation, continuation)
+		}
+		contResp, err := c.post(endpointURL, contPayload)
 		if err != nil {
 			return nil, fmt.Errorf("fetch playlist page %d: %w", page, err)
 		}
@@ -318,15 +324,6 @@ func (c *Client) CreatePlaylist(title, description, privacy string) (string, err
 	}
 
 	return res.PlaylistID, nil
-}
-
-// DeletePlaylist deletes a playlist by its ID
-func (c *Client) DeletePlaylist(playlistID string) error {
-	payload := clientContext("", "")
-	payload["playlistId"] = playlistID
-
-	_, err := c.post(EndpointDeletePlaylist, payload)
-	return err
 }
 
 // RemovePlaylistItems removes specified tracks from a playlist in batches of at most 20

@@ -46,7 +46,7 @@ func extractTargetID(input string) (string, bool) {
 		return "", false
 	}
 
-	// 1. Direct ID matches
+	// 1. Direct platform ID matches
 	if ytVideoIDRegex.MatchString(raw) {
 		return raw, true
 	}
@@ -60,6 +60,7 @@ func extractTargetID(input string) (string, bool) {
 		if spTrackIDRegex.MatchString(id) {
 			return id, true
 		}
+		return "", false
 	}
 
 	// 3. URL match (YouTube / YTM / Spotify)
@@ -87,11 +88,6 @@ func extractTargetID(input string) (string, bool) {
 				}
 			}
 		}
-	}
-
-	// 4. Fallback alphanumeric sanity check
-	if len(raw) >= 8 && !strings.Contains(raw, " ") && !strings.Contains(raw, "/") {
-		return raw, true
 	}
 
 	return "", false

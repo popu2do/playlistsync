@@ -10,13 +10,23 @@ The codebase is structured in Go following a clean layered architecture, strictl
 .
 ├── go.mod
 ├── internal/
+│   ├── auth/            # Headless & interactive CDP auth, token/cookie probes, proxy detection
+│   │   ├── auth.go      # High-level auth facades (EnsureAuthenticated, LoginPlatform)
+│   │   ├── cdp.go       # CDP WebSocket client & browser lifecycle management
+│   │   ├── storage.go   # Secure credential file I/O (0600 permissions, atomic writes)
+│   │   └── validator.go # Session validation probes & TOTP token signatures
+│   │
+│   ├── config/          # Central configuration & environment variable mappings
+│   │   └── config.go    # AppConfig, directory resolution, and defaults
+│   │
 │   ├── model/           # Canonical domain entities and data definitions
 │   │   ├── spotify.go   # SpotifyPlaylist, SpotifyTrack
-│   │   ├── ytmusic.go   # YTMPlaylist, YTMTrack, YTMSearchResult, YTMEditAction
+│   │   ├── ytmusic.go   # YTMPlaylist, YTMTrack, YTMSearchResult
 │   │   └── sync.go      # SyncResult, SkippedTrack, AddedTrack, RemovedTrack
 │   │
 │   ├── spotify/         # Spotify data access layer
-│   │   └── reader.go    # JSON and CSV reader/writer implementations
+│   │   ├── client.go    # Spotify Web API, GraphQL, and Embed scraper
+│   │   └── reader.go    # JSON/CSV file reader and writer
 │   │
 │   ├── ytmusic/         # YouTube Music Innertube API adapter
 │   │   ├── client.go    # HTTP client with SAPISID authentication
@@ -24,6 +34,7 @@ The codebase is structured in Go following a clean layered architecture, strictl
 │   │
 │   ├── engine/          # Core synchronization engine
 │   │   ├── diff.go      # Diffing and confidence matching algorithms
+│   │   ├── review.go    # Interactive review prompts and decision state machine
 │   │   └── syncer.go    # End-to-end sync workflow orchestration
 │   │
 │   └── report/          # Audit and verification layer

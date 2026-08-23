@@ -414,6 +414,11 @@ func (s *Syncer) runSyncSpotifyToYouTube() (*model.SyncResult, error) {
 		return skippedList[i].Index < skippedList[j].Index
 	})
 
+	matchedOrAdded := len(spPlaylist.Tracks) - len(skippedList)
+	if matchedOrAdded < 0 {
+		matchedOrAdded = 0
+	}
+
 	result := &model.SyncResult{
 		Direction:          "spotify-to-youtube-music",
 		SourcePlatform:     "spotify",
@@ -424,7 +429,7 @@ func (s *Syncer) runSyncSpotifyToYouTube() (*model.SyncResult, error) {
 		Title:              finalPl.Title,
 		SourcePlaylistURL:  spPlaylist.SourcePlaylistURL,
 		TotalSourceTracks:  len(spPlaylist.Tracks),
-		AddedTracks:        len(finalPl.Tracks),
+		AddedTracks:        matchedOrAdded,
 		SkippedTracks:      len(skippedList),
 		Skipped:            skippedList,
 		AddedAfterReview:   reviewedAdditions,
@@ -728,6 +733,11 @@ func (s *Syncer) runSyncYouTubeToSpotify() (*model.SyncResult, error) {
 		return skippedList[i].Index < skippedList[j].Index
 	})
 
+	matchedOrAdded := len(ytmPlaylist.Tracks) - len(skippedList)
+	if matchedOrAdded < 0 {
+		matchedOrAdded = 0
+	}
+
 	result := &model.SyncResult{
 		Direction:          "youtube-music-to-spotify",
 		SourcePlatform:     "youtube-music",
@@ -738,9 +748,10 @@ func (s *Syncer) runSyncYouTubeToSpotify() (*model.SyncResult, error) {
 		Title:              finalPl.PlaylistName,
 		SourcePlaylistURL:  fmt.Sprintf("https://music.youtube.com/playlist?list=%s", ytmPlaylist.ID),
 		TotalSourceTracks:  len(ytmPlaylist.Tracks),
-		AddedTracks:        len(finalPl.Tracks),
+		AddedTracks:        matchedOrAdded,
 		SkippedTracks:      len(skippedList),
 		Skipped:            skippedList,
+		AddedAfterReview:   spReviewOutcome.ReviewedAdditions,
 		RemovedExtraTracks: removedList,
 		LastSyncedAt:       time.Now().UTC().Format(time.RFC3339),
 		Verification: &model.Verification{
@@ -865,10 +876,6 @@ func GenerateSearchQueries(track model.SpotifyTrack) []string {
 	return generateCandidateQueries(track.Title, track.Artists, track.Query)
 }
 
-func generateSearchQueries(track model.SpotifyTrack) []string {
-	return generateCandidateQueries(track.Title, track.Artists, track.Query)
-}
-
 func (s *Syncer) loadKnownMapping(sp *model.SpotifyPlaylist) map[int]string {
 	mapping := make(map[int]string)
 
@@ -959,7 +966,7 @@ type ytmCandidateResolution struct {
 }
 
 func (s *Syncer) resolveYTMCandidate(track model.SpotifyTrack) ytmCandidateResolution {
-	queries := generateSearchQueries(track)
+	queries := GenerateSearchQueries(track)
 	var allCandidates []model.YTMSearchResult
 	var bestCandidate *model.YTMSearchResult
 	bestScore := 0

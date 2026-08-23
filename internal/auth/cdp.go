@@ -13,7 +13,8 @@ import (
 )
 
 var (
-	cdpPort = DefaultCDPPort
+	cdpPort           = DefaultCDPPort
+	cdpStartupTimeout = 10 * time.Second
 
 	// Direct loopback HTTP client that never routes localhost requests through any proxy
 	directCDPClient = &http.Client{
@@ -29,9 +30,17 @@ var (
 	}
 )
 
+// SetCDPStartupTimeoutForTesting overrides startup deadline for unit tests
+func SetCDPStartupTimeoutForTesting(d time.Duration) func() {
+	orig := cdpStartupTimeout
+	cdpStartupTimeout = d
+	return func() {
+		cdpStartupTimeout = orig
+	}
+}
+
 type cdpTarget struct {
 	ID                   string `json:"id"`
-	Type                 string `json:"type"`
 	URL                  string `json:"url"`
 	WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
 }
@@ -185,23 +194,6 @@ func getCDPTarget(port int, hostMatch string) (string, string) {
 		}
 	}
 	return "", ""
-}
-
-// QueryAllCDPCookies extracts cookie header string from active targets
-func QueryAllCDPCookies(port int) (string, error) {
-	targets, err := fetchCDPTargets(port)
-	if err != nil {
-		return "", err
-	}
-
-	for _, t := range targets {
-		if strings.Contains(t.URL, "youtube.com") {
-			if pageID := extractPageID(t.WebSocketDebuggerURL); pageID != "" {
-				return sendRawCDPGetAllCookies(port, pageID)
-			}
-		}
-	}
-	return "", nil
 }
 
 func sendRawCDPGetCookies(port int, pageID string, targetCookie string) (string, error) {

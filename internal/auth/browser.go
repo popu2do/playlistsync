@@ -21,17 +21,6 @@ func defaultBrowserLauncher(browserExe string, args []string) (*exec.Cmd, error)
 	return cmd, nil
 }
 
-// SetBrowserLookupForTesting overrides browser path lookup delegate for testing
-func SetBrowserLookupForTesting(lookup func() (string, error)) func() {
-	origLookup := browserLookupFn
-	if lookup != nil {
-		browserLookupFn = lookup
-	}
-	return func() {
-		browserLookupFn = origLookup
-	}
-}
-
 // SetBrowserLauncherForTesting overrides browser execution delegates to avoid opening real windows in tests
 func SetBrowserLauncherForTesting(lookup func() (string, error), launcher func(string, []string) (*exec.Cmd, error)) func() {
 	origLookup := browserLookupFn
@@ -85,8 +74,10 @@ func FindBrowserPath() (string, error) {
 			"/Applications/Chromium.app/Contents/MacOS/Chromium",
 		}
 		for _, c := range candidates {
-			if _, err := os.Stat(c); err == nil {
-				return c, nil
+			if c != "" {
+				if _, err := os.Stat(c); err == nil {
+					return c, nil
+				}
 			}
 		}
 	default:

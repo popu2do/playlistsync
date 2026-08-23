@@ -2268,3 +2268,75 @@ func TestProperty_GenerateSearchQueries(t *testing.T) {
 		t.Errorf("GenerateSearchQueries property check failed: %v", err)
 	}
 }
+
+func TestExecuteReview_Scenarios(t *testing.T) {
+	items := []engine.ReviewItem{
+		{
+			SourceIndex:   1,
+			SourceTitle:   "Song A",
+			SourceArtists: []string{"Artist A"},
+			Options: []engine.ReviewOption{
+				{TargetID: "id_a1", Title: "Song A Match", Score: 60},
+			},
+		},
+		{
+			SourceIndex:   2,
+			SourceTitle:   "Song B",
+			SourceArtists: []string{"Artist B"},
+			Options: []engine.ReviewOption{
+				{TargetID: "id_b1", Title: "Song B Match", Score: 55},
+			},
+		},
+		{
+			SourceIndex:   3,
+			SourceTitle:   "Song C",
+			SourceArtists: []string{"Artist C"},
+			Options: []engine.ReviewOption{
+				{TargetID: "id_c1", Title: "Song C Match", Score: 50},
+			},
+		},
+	}
+
+	t.Run("Empty items slice", func(t *testing.T) {
+		res := engine.ExecuteReview(nil, nil, false)
+		if len(res.AcceptedIDs) != 0 || len(res.ReviewedAdditions) != 0 || len(res.SkippedTracks) != 0 {
+			t.Errorf("expected empty review result, got %+v", res)
+		}
+	})
+
+	t.Run("Nil prompt or autoYes skips all", func(t *testing.T) {
+		res := engine.ExecuteReview(items, nil, true)
+		if len(res.AcceptedIDs) != 0 || len(res.ReviewedAdditions) != 0 {
+			t.Errorf("expected 0 additions for autoYes, got %+v", res)
+		}
+		if len(res.SkippedTracks) != 3 {
+			t.Errorf("expected 3 skipped tracks, got %d", len(res.SkippedTracks))
+		}
+	})
+
+	t.Run("Accept first, skip second, abort remaining", func(t *testing.T) {
+		mockPrompt := func(item engine.ReviewItem) (string, bool, bool) {
+			if item.SourceIndex == 1 {
+				return "id_a1", true, false
+			}
+			if item.SourceIndex == 2 {
+				return "", false, true // stopRemaining = true
+			}
+			return "", false, false
+		}
+
+		res := engine.ExecuteReview(items, mockPrompt, false)
+		if len(res.AcceptedIDs) != 1 || res.AcceptedIDs[1] != "id_a1" {
+			t.Errorf("expected item 1 accepted with id_a1, got %+v", res.AcceptedIDs)
+		}
+		if len(res.ReviewedAdditions) != 1 || res.ReviewedAdditions[0].DestinationTitle != "Song A Match" {
+			t.Errorf("expected ReviewedAddition with title 'Song A Match', got %+v", res.ReviewedAdditions)
+		}
+		if len(res.SkippedTracks) != 2 {
+			t.Fatalf("expected 2 skipped tracks, got %d", len(res.SkippedTracks))
+		}
+		if res.SkippedTracks[0].Index != 2 || res.SkippedTracks[1].Index != 3 {
+			t.Errorf("expected skipped tracks with indices 2 and 3, got %+v", res.SkippedTracks)
+		}
+	})
+}

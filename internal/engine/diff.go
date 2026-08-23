@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"playlistsync/internal/config"
 	"playlistsync/internal/model"
 	"regexp"
 	"strconv"
@@ -13,7 +14,7 @@ import (
 
 // Confidence and Scoring Constants
 const (
-	// ConfidenceThreshold defines the minimum score required for an automated match (>= 70)
+	// ConfidenceThreshold defines the default minimum score required for an automated match (>= 70)
 	ConfidenceThreshold = 70
 
 	// Title match weights
@@ -38,6 +39,11 @@ const (
 	ScoreDurationPenaltyMild   = -25
 	ScoreDurationPenaltySevere = -40
 )
+
+// GetConfidenceThreshold returns the dynamically configured confidence threshold
+func GetConfidenceThreshold() int {
+	return config.GetConfidenceScore()
+}
 
 var (
 	t2sConverter *gocc.OpenCC
