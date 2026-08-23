@@ -1,46 +1,117 @@
-# Operational Workflow & Procedures: playlistsync
+# Operational Workflow & User Guide: playlistsync
 
-## 1. Standard Synchronization Workflow
+## 1. Authentication & Prerequisites
 
-### Step 1: Authenticate Credentials or Place Source Data
-Ensure credentials are authenticated via CDP login or placed in the `output/auth/` directory:
-- `output/auth/spotify_credentials.json` (Spotify session credentials / cookie)
-- `output/auth/ytmusic_credentials.json` (YouTube Music session credentials / headers)
-- `output/spotify_<playlist>_source.json` (Cached source playlist track data, or automatically fetched via Web API / Embed)
+`playlistsync` uses Chrome DevTools Protocol (CDP) to automatically capture authenticated session credentials into isolated profiles.
 
-Alternatively, run `playlistsync login all` or `playlistsync login <platform>` to automatically capture session credentials.
+### Authenticating Platforms
 
-### Step 2: Run Synchronization
-Execute playlist synchronization using canonical platform names or aliases:
 ```bash
-# Spotify to YouTube Music (Default)
-playlistsync sync <playlist_name> --from=spotify --to=youtube-music
+# Authenticate both Spotify and YouTube Music
+playlistsync login all
 
-# YouTube Music to Spotify
-playlistsync sync <playlist_name> --from=youtube-music --to=spotify
+# Authenticate YouTube Music only
+playlistsync login youtube-music
+
+# Authenticate Spotify only
+playlistsync login spotify
+
+# Force re-authentication bypassing cached session validation
+playlistsync login all --force
 ```
 
-### Step 3: Inspect & Validate Results
-Inspect synchronization metrics and verify invariant constraints:
+When triggered, an isolated browser window will open. Complete the login or QR code verification in the window. The CLI detects session cookies, saves them securely to `output/auth/`, and closes the browser automatically.
+
+---
+
+## 2. Migration & Synchronization Scenarios
+
+### Scenario A: Spotify to YouTube Music (Default)
+
+Synchronize a Spotify playlist to YouTube Music by playlist name or ID:
+
 ```bash
-# Inspect summary
-playlistsync inspect <playlist_name>
+# Sync by playlist name (will search or resolve Spotify playlist)
+playlistsync sync "My Favorite Songs" --from=spotify --to=youtube-music
 
-# Validate dataset integrity
-playlistsync verify <playlist_name>
+# Sync from a local Spotify JSON export file directly
+playlistsync sync "My Favorite Songs" --json="output/spotify_my_playlist_source.json"
 
-# Regenerate report artifact
-playlistsync report <playlist_name>
+# Sync into an existing YouTube Music destination playlist ID
+playlistsync sync "My Favorite Songs" --playlist-id="PLxxxxxxxxxxxxxxxxxxxx"
+```
+
+### Scenario B: YouTube Music to Spotify (Reverse Migration)
+
+```bash
+playlistsync sync "My YTM Playlist" --from=youtube-music --to=spotify
+```
+
+### Scenario C: Incremental Synchronization
+
+When new tracks are added to the source playlist or existing tracks are re-arranged:
+
+```bash
+# Differential reconciliation will identify new tracks and add them without duplicating existing tracks
+playlistsync sync "My Favorite Songs"
+
+# Preserve extraneous tracks in the destination playlist without pruning
+playlistsync sync "My Favorite Songs" --clean-extra=false
+```
+
+### Scenario D: Non-Interactive / CI Batch Automation
+
+For headless, automated pipelines or unattended execution:
+
+```bash
+# Run with automatic confirmation for all prompts and reviews
+playlistsync sync "My Favorite Songs" --yes --non-interactive
+
+# Specify custom worker concurrency and proxy
+playlistsync sync "My Favorite Songs" -y -c 8 --proxy="http://127.0.0.1:7890"
 ```
 
 ---
 
-## 2. File Location Reference
-- `output/auth/spotify_credentials.json`: Authenticated Spotify session credentials.
-- `output/auth/ytmusic_credentials.json`: Authenticated YouTube Music session headers.
-- `output/spotify_<playlist>_source.json`: Spotify source playlist track snapshot (backward-compatible with `<playlist>_playlist.json`).
-- `output/ytmusic_<playlist>_source.json`: YouTube Music source playlist track snapshot.
-- `output/spotify_to_ytmusic_<playlist>_result.json`: Raw execution outcome for Spotify -> YouTube Music sync.
-- `output/spotify_to_ytmusic_<playlist>_report.json`: Canonical migration audit report for Spotify -> YouTube Music sync.
-- `output/ytmusic_to_spotify_<playlist>_result.json`: Raw execution outcome for YouTube Music -> Spotify sync.
-- `output/ytmusic_to_spotify_<playlist>_report.json`: Canonical migration audit report for YouTube Music -> Spotify sync.
+## 3. Post-Sync Inspection & Invariant Verification
+
+### 3.1 Inspect Migration Summary
+
+Display a human-readable summary of matched, added, and skipped tracks:
+
+```bash
+playlistsync inspect "My Favorite Songs"
+```
+
+### 3.2 Verify Invariant Integrity
+
+Run the 4 formal data invariant assertions on migration datasets:
+
+```bash
+playlistsync verify "My Favorite Songs"
+```
+
+### 3.3 Regenerate Audit Report
+
+Regenerate canonical JSON report artifacts:
+
+```bash
+playlistsync report "My Favorite Songs"
+```
+
+---
+
+## 4. File Path & Artifact Mappings
+
+| File Path | Description | Access Mode |
+| :--- | :--- | :--- |
+| `output/auth/spotify_credentials.json` | Authenticated Spotify session token and cookie state | Confidential (0600) |
+| `output/auth/ytmusic_credentials.json` | Authenticated YouTube Music session headers & cookies | Confidential (0600) |
+| `output/auth/.chrome_spotify/` | Isolated Chromium profile directory for Spotify | Cache / Private |
+| `output/auth/.chrome_ytmusic/` | Isolated Chromium profile directory for YouTube Music | Cache / Private |
+| `output/spotify_<playlist>_source.json` | Snapshot of source Spotify playlist track metadata | Read / Snapshot |
+| `output/ytmusic_<playlist>_source.json` | Snapshot of source YouTube Music playlist track metadata | Read / Snapshot |
+| `output/spotify_to_ytmusic_<playlist>_result.json` | Detailed raw execution output for Spotify -> YTM sync | Result Log |
+| `output/spotify_to_ytmusic_<playlist>_report.json` | Canonical audit report for Spotify -> YTM sync | Audit Artifact |
+| `output/ytmusic_to_spotify_<playlist>_result.json` | Detailed raw execution output for YTM -> Spotify sync | Result Log |
+| `output/ytmusic_to_spotify_<playlist>_report.json` | Canonical audit report for YTM -> Spotify sync | Audit Artifact |

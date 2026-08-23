@@ -1,10 +1,8 @@
 # Provider Interface Contracts & Protocols
 
-## 1. Provider Interfaces
+## 1. Go Interface Contracts
 
-The architecture defines clean contracts for provider adapters and subsystems.
-
-### 1.1 Spotify Provider Contracts
+### 1.1 Spotify Contracts (`internal/spotify`)
 
 #### 1.1.1 File I/O Contract (`SpotifyReader`)
 ```go
@@ -19,7 +17,7 @@ type SpotifyReader interface {
     WritePlaylistCSV(filePath string, pl *model.SpotifyPlaylist) error
 
     // FindPlaylistByName searches for a playlist file matching the name in a directory.
-    FindPlaylistByName(dataDir string, name string) (*model.SpotifyPlaylist, string, error)
+    FindPlaylistByName(searchDir string, name string) (*model.SpotifyPlaylist, string, error)
 }
 ```
 
@@ -28,9 +26,6 @@ type SpotifyReader interface {
 type SpotifyClient interface {
     // FindPlaylist resolves a playlist by exact name, Spotify ID, or share URL.
     FindPlaylist(nameOrIDOrURL string) (*model.SpotifyPlaylist, error)
-
-    // FetchPlaylistFromGraphQL fetches un-truncated playlists (>100 tracks) via Spotify Partner GraphQL.
-    FetchPlaylistFromGraphQL(playlistID string) (*model.SpotifyPlaylist, error)
 
     // GetPlaylist retrieves full playlist metadata.
     GetPlaylist(playlistID string) (*model.SpotifyPlaylist, error)
@@ -54,11 +49,11 @@ type SpotifyClient interface {
 
 ---
 
-### 1.2 YouTube Music Provider Contract
+### 1.2 YouTube Music Provider Contract (`internal/ytmusic`)
 
 ```go
 type YouTubeMusicClient interface {
-    // GetPlaylist retrieves playlist metadata and full track items using pagination.
+    // GetPlaylist retrieves playlist metadata and full track items using pagination continuations.
     GetPlaylist(playlistID string) (*model.YTMPlaylist, error)
 
     // AddPlaylistItems appends video IDs to the specified playlist.
@@ -83,18 +78,35 @@ type YouTubeMusicClient interface {
 
 ---
 
-## 2. YouTube Music Innertube API Protocol Specification
+### 1.3 Reporting & Validation Contract (`internal/report`)
+
+```go
+type Reporter interface {
+    // Summarize prints human-readable migration statistics to stdout.
+    Summarize(resultPath string) error
+
+    // Validate verifies invariant assertions across source, result, and report datasets.
+    Validate(sourcePath, resultPath, reportPath string) error
+
+    // GenerateReport persists the canonical report file atomically.
+    GenerateReport(resultPath, reportPath string) error
+}
+```
+
+---
+
+## 2. YouTube Music Innertube Wire Protocol
 
 ### 2.1 Authentication & Request Signing
 
-Authenticated Innertube requests (`WEB_REMIX` client) require dynamic `SAPISIDHASH` computation from session cookies.
+Authenticated Innertube endpoints require dynamic `SAPISIDHASH` computation from session cookies (`SAPISID` or `__Secure-3PAPISID`).
 
-#### Header Specification:
+#### Wire Headers:
 ```http
 POST /youtubei/v1/<endpoint>?prettyPrint=false HTTP/1.1
 Host: music.youtube.com
 Content-Type: application/json
-User-Agent: <Browser User Agent>
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36
 Cookie: SAPISID=<sapisid_token>; __Secure-3PAPISID=...
 Authorization: SAPISIDHASH <timestamp>_<sha1_hex>
 X-Goog-AuthUser: 0
@@ -111,11 +123,11 @@ AuthHeader = "SAPISIDHASH " + T + "_" + Hash
 
 ---
 
-### 2.2 Endpoint Contracts
+### 2.2 Wire Endpoints
 
-#### 2.2.1 Browse Playlist Endpoint (`/youtubei/v1/browse`)
+#### 2.2.1 Browse Playlist (`/youtubei/v1/browse`)
 
-- **Payload**:
+- **Initial Browse Payload**:
   ```json
   {
     "context": {
@@ -129,39 +141,51 @@ AuthHeader = "SAPISIDHASH " + T + "_" + Hash
     "browseId": "VLPL_TARGET_PLAYLIST_ID"
   }
   ```
+- **Continuation Pagination**:
+  Query parameter `continuation=<continuationToken>` with context body.
 
-#### 2.2.2 Edit Playlist Endpoint (`/youtubei/v1/browse/edit_playlist`)
+#### 2.2.2 Edit Playlist (`/youtubei/v1/browse/edit_playlist`)
 
-- **Add Videos Action**:
+- **Add Tracks Action**:
   ```json
   {
-    "context": { "client": { "clientName": "WEB_REMIX", "clientVersion": "1.20260822.01.00" } },
+    "context": {
+      "client": {
+        "clientName": "WEB_REMIX",
+        "clientVersion": "1.20260822.01.00"
+      }
+    },
     "playlistId": "PL_TARGET_PLAYLIST_ID",
     "actions": [
       {
         "action": "ACTION_ADD_VIDEO",
-        "addedVideoId": "video_id_to_add"
+        "addedVideoId": "VIDEO_ID_TO_ADD"
       }
     ]
   }
   ```
 
-- **Remove Videos Action**:
+- **Remove Tracks Action**:
   ```json
   {
-    "context": { "client": { "clientName": "WEB_REMIX", "clientVersion": "1.20260822.01.00" } },
+    "context": {
+      "client": {
+        "clientName": "WEB_REMIX",
+        "clientVersion": "1.20260822.01.00"
+      }
+    },
     "playlistId": "PL_TARGET_PLAYLIST_ID",
     "actions": [
       {
         "action": "ACTION_REMOVE_VIDEO",
-        "setVideoId": "set_video_id",
-        "removedVideoId": "video_id_to_remove"
+        "setVideoId": "SET_VIDEO_ID_UUID",
+        "removedVideoId": "VIDEO_ID_TO_REMOVE"
       }
     ]
   }
   ```
 
-#### 2.2.3 Search Endpoint (`/youtubei/v1/search`)
+#### 2.2.3 Search Songs (`/youtubei/v1/search`)
 
 - **Payload**:
   ```json
@@ -174,33 +198,75 @@ AuthHeader = "SAPISIDHASH " + T + "_" + Hash
         "gl": "US"
       }
     },
-    "query": "Song Title Artist Name",
+    "query": "Track Title Artist Name",
     "params": "EgWKAQIIAWoSEAUQAxAEEAkQChAOEBAQFRAR"
   }
   ```
 
 ---
 
-## 3. Reporting & Validation Contract
+## 3. Canonical Domain Model Schemas (`internal/model`)
+
+### 3.1 Spotify Models (`internal/model/spotify.go`)
 
 ```go
-type Reporter interface {
-    // Summarize prints migration statistics to stdout.
-    Summarize(spotifyPath, resultPath string) error
+type SpotifyTrack struct {
+    Index      int      `json:"index"`
+    ID         string   `json:"id"`
+    Title      string   `json:"title"`
+    Artists    []string `json:"artists"`
+    Album      string   `json:"album"`
+    Duration   string   `json:"duration"`
+    SpotifyURI string   `json:"spotifyUri"`
+    SpotifyURL string   `json:"spotifyUrl"`
+    Query      string   `json:"query"`
+}
 
-    // Validate verifies invariant assertions across source, result, and report datasets.
-    Validate(spotifyPath, resultPath, reportPath string) error
-
-    // GenerateReport persists the canonical report file.
-    GenerateReport(resultPath, reportPath string) error
+type SpotifyPlaylist struct {
+    Platform          string         `json:"platform"`
+    PlaylistName      string         `json:"playlistName"`
+    SourcePlaylistURL string         `json:"sourcePlaylistUrl"`
+    ExpectedCount     int            `json:"expectedCount"`
+    CollectedCount    int            `json:"collectedCount"`
+    Tracks            []SpotifyTrack `json:"tracks"`
 }
 ```
 
----
+### 3.2 YouTube Music Models (`internal/model/ytmusic.go`)
 
-## 4. Canonical Domain Entity Contracts (`internal/model`)
+```go
+type YTMTrack struct {
+    VideoID    string   `json:"videoId"`
+    SetVideoID string   `json:"setVideoId,omitempty"`
+    Title      string   `json:"title"`
+    Artists    []string `json:"artists"`
+    Duration   string   `json:"duration,omitempty"`
+}
 
-### 4.1 Synchronization Result (`SyncResult`)
+type YTMPlaylist struct {
+    ID          string     `json:"id"`
+    Title       string     `json:"title"`
+    Description string     `json:"description,omitempty"`
+    TrackCount  int        `json:"trackCount"`
+    Tracks      []YTMTrack `json:"tracks"`
+}
+
+type YTMPlaylistSummary struct {
+    ID    string `json:"id"`
+    Title string `json:"title"`
+}
+
+type YTMSearchResult struct {
+    VideoID  string   `json:"videoId"`
+    Title    string   `json:"title"`
+    Artists  []string `json:"artists"`
+    Duration string   `json:"duration,omitempty"`
+    Score    int      `json:"score,omitempty"`
+}
+```
+
+### 3.3 Synchronization & Execution Models (`internal/model/sync.go`)
+
 ```go
 type SyncResult struct {
     Direction          string         `json:"direction"`
@@ -220,10 +286,7 @@ type SyncResult struct {
     LastSyncedAt       string         `json:"lastSyncedAt"`
     Verification       *Verification  `json:"verification,omitempty"`
 }
-```
 
-### 4.2 Track Entities
-```go
 type SkippedTrack struct {
     Index   int      `json:"index"`
     Title   string   `json:"title"`
@@ -244,5 +307,10 @@ type RemovedTrack struct {
     Title         string   `json:"title"`
     Artists       []string `json:"artists"`
 }
-```
 
+type Verification struct {
+    PageTitle      string `json:"pageTitle"`
+    PageTrackCount int    `json:"pageTrackCount"`
+    Description    string `json:"description,omitempty"`
+}
+```

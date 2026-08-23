@@ -248,6 +248,38 @@ func TestValidate_Failures(t *testing.T) {
 		t.Errorf("expected validation failure for report skipped tracks mismatch")
 	}
 
+	t.Run("Invariant 1: Total conservation violation", func(t *testing.T) {
+		badTotal := validRes
+		badTotal.TotalSourceTracks = 50
+		badTotal.AddedTracks = 40
+		badTotal.SkippedTracks = 5 // 40 + 5 = 45 != 50
+		badTotal.Skipped = []model.SkippedTrack{
+			{Index: 1, Title: "S1", Artists: []string{"A1"}, Reason: "reason1"},
+			{Index: 2, Title: "S2", Artists: []string{"A2"}, Reason: "reason2"},
+			{Index: 3, Title: "S3", Artists: []string{"A3"}, Reason: "reason3"},
+			{Index: 4, Title: "S4", Artists: []string{"A4"}, Reason: "reason4"},
+			{Index: 5, Title: "S5", Artists: []string{"A5"}, Reason: "reason5"},
+		}
+		writeJSONFile(t, resPath, badTotal)
+		writeJSONFile(t, repPath, badTotal)
+		if err := report.Validate(spPath, resPath, repPath); err == nil {
+			t.Errorf("expected validation failure for Invariant 1 total conservation violation")
+		}
+	})
+
+	t.Run("Skipped track count mismatch", func(t *testing.T) {
+		badSkipCount := validRes
+		badSkipCount.SkippedTracks = 2
+		badSkipCount.Skipped = []model.SkippedTrack{
+			{Index: 1, Title: "S1", Artists: []string{"A1"}, Reason: "reason"},
+		} // len is 1, but SkippedTracks is 2
+		writeJSONFile(t, resPath, badSkipCount)
+		writeJSONFile(t, repPath, badSkipCount)
+		if err := report.Validate(spPath, resPath, repPath); err == nil {
+			t.Errorf("expected validation failure for skipped track count mismatch")
+		}
+	})
+
 	t.Run("Invariant 2: Verification PageTrackCount Mismatch", func(t *testing.T) {
 		badVer := validRes
 		badVer.Verification = &model.Verification{
@@ -274,6 +306,19 @@ func TestValidate_Failures(t *testing.T) {
 		}
 	})
 
+	t.Run("Invariant 3: Non-positive Skipped Index", func(t *testing.T) {
+		badIndex := validRes
+		badIndex.Skipped = []model.SkippedTrack{
+			{Index: 0, Title: "Song 1", Artists: []string{"Artist 1"}, Reason: "reason"},
+			{Index: 2, Title: "Song 2", Artists: []string{"Artist 2"}, Reason: "ok"},
+		}
+		writeJSONFile(t, resPath, badIndex)
+		writeJSONFile(t, repPath, badIndex)
+		if err := report.Validate(spPath, resPath, repPath); err == nil {
+			t.Errorf("expected validation failure for Invariant 3 non-positive index")
+		}
+	})
+
 	t.Run("Invariant 4: Empty Added TargetTrackID", func(t *testing.T) {
 		badAdded := validRes
 		badAdded.AddedAfterReview = []model.AddedTrack{
@@ -283,6 +328,55 @@ func TestValidate_Failures(t *testing.T) {
 		writeJSONFile(t, repPath, badAdded)
 		if err := report.Validate(spPath, resPath, repPath); err == nil {
 			t.Errorf("expected validation failure for Invariant 4 empty TargetTrackID")
+		}
+	})
+
+	t.Run("Invariant 4: Empty Added Title or Non-positive Index", func(t *testing.T) {
+		badAddedTitle := validRes
+		badAddedTitle.AddedAfterReview = []model.AddedTrack{
+			{Index: 3, Title: "   ", Artists: []string{"Artist 3"}, TargetTrackID: "vid123"},
+		}
+		writeJSONFile(t, resPath, badAddedTitle)
+		writeJSONFile(t, repPath, badAddedTitle)
+		if err := report.Validate(spPath, resPath, repPath); err == nil {
+			t.Errorf("expected validation failure for Invariant 4 empty title")
+		}
+
+		badAddedIdx := validRes
+		badAddedIdx.AddedAfterReview = []model.AddedTrack{
+			{Index: -1, Title: "Song", Artists: []string{"Artist 3"}, TargetTrackID: "vid123"},
+		}
+		writeJSONFile(t, resPath, badAddedIdx)
+		writeJSONFile(t, repPath, badAddedIdx)
+		if err := report.Validate(spPath, resPath, repPath); err == nil {
+			t.Errorf("expected validation failure for Invariant 4 non-positive index")
+		}
+	})
+
+	t.Run("Validate bidirectional with YTM source playlist", func(t *testing.T) {
+		ytmSourcePath := filepath.Join(tempDir, "ytm_source.json")
+		ytmSource := model.YTMPlaylist{
+			Tracks: make([]model.YTMTrack, 50),
+		}
+		writeJSONFile(t, ytmSourcePath, ytmSource)
+		writeJSONFile(t, resPath, validRes)
+		writeJSONFile(t, repPath, validRes)
+		if err := report.Validate(ytmSourcePath, resPath, repPath); err != nil {
+			t.Errorf("expected successful validation for YTM source playlist, got %v", err)
+		}
+	})
+
+	t.Run("Reporter interface dispatch", func(t *testing.T) {
+		r := report.NewReporter()
+		if err := r.Summarize(spPath, resPath); err != nil {
+			t.Errorf("r.Summarize failed: %v", err)
+		}
+		if err := r.Validate(spPath, resPath, repPath); err != nil {
+			t.Errorf("r.Validate failed: %v", err)
+		}
+		newRepPath := filepath.Join(tempDir, "iface_rep.json")
+		if err := r.GenerateReport(resPath, newRepPath); err != nil {
+			t.Errorf("r.GenerateReport failed: %v", err)
 		}
 	})
 

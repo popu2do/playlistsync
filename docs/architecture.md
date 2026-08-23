@@ -1,8 +1,8 @@
-# Architecture & Component Design: playlistsync (Go)
+# Architecture & Component Design: playlistsync
 
 ## 1. System Overview
 
-The **Universal Playlist Synchronization CLI** (`playlistsync`) is a modular, high-reliability Go application designed to synchronize playlists across Spotify and YouTube Music with differential reconciliation, conservative candidate matching, and auditability.
+`playlistsync` is a modular, high-reliability Go application designed to synchronize playlists bidirectionally between streaming platforms (Spotify and YouTube Music) with differential reconciliation, conservative multi-factor candidate matching, and automated invariant verification.
 
 ```
 +-------------------------------------------------------------------------+
@@ -37,31 +37,58 @@ The **Universal Playlist Synchronization CLI** (`playlistsync`) is a modular, hi
 +-------------------------------------------------------------------------+
 ```
 
-## 2. Layer Definitions & Responsibilities
+---
+
+## 2. Layer Architecture & Responsibilities
 
 ### 2.1 Presentation Layer (`cmd/playlistsync`)
-- Handles CLI commands: `sync`, `login`, `inspect`, `verify`, `report`.
-- Parses flags: `--from`, `--to`, `--proxy`, `--clean-extra`, `--yes`.
-- Manages terminal review prompt interaction and process exit codes.
+- **CLI Command Dispatching**: Implements `sync`, `login`, `inspect`, `verify`, and `report` subcommands.
+- **Option & Flag Parsing**: Handles parameters such as `--from`, `--to`, `--proxy`, `--clean-extra`, `--yes`, `--concurrency`, and `--output-dir`.
+- **Interactive Prompts**: Manages terminal-based candidate review interactions and maps system outcomes to standard exit codes.
 
 ### 2.2 Domain Layer (`internal/model`)
-- Declares platform-agnostic data models: `SpotifyPlaylist`, `SpotifyTrack`, `YTMPlaylist`, `YTMTrack`, `SyncResult`, `DiffPlan`.
-- Pure Go structs with standard JSON serialization tags; zero external dependencies.
+- **Canonical Domain Models**: Defines platform-agnostic models (`SpotifyPlaylist`, `SpotifyTrack`, `YTMPlaylist`, `YTMTrack`, `SyncResult`, `SkippedTrack`, `AddedTrack`, `RemovedTrack`, `Verification`).
+- **Zero-Dependency Architecture**: Pure Go types with JSON serialization tags, devoid of external library or protocol dependencies.
 
 ### 2.3 Engine Layer (`internal/engine`)
-- **`diff.go`**: Pure diff engine comparing source and destination track sets. Implements conservative Unicode-aware title/artist matching heuristics.
-- **`review.go`**: Interactive human review prompt hooks and decision state machines.
-- **`syncer.go`**: High-level workflow orchestrator managing target playlist creation, search queries, incremental batch additions, and extraneous track pruning.
+- **`diff.go`**: Computes differential plans comparing source and target track collections. Implements Unicode-aware text normalization, CJK simplified/traditional conversion, and multi-factor fuzzy confidence scoring.
+- **`review.go`**: Encapsulates interactive terminal decision hooks for human review of moderate-confidence candidates.
+- **`syncer.go`**: High-level workflow orchestrator managing target playlist discovery/creation, concurrent candidate search, batch insertions, and extraneous track pruning.
 
 ### 2.4 Reporting & Audit Layer (`internal/report`)
-- Formats human-readable console summaries (`inspect`).
-- Runs invariant integrity checks on source, sync result, and audit reports (`verify`).
-- Generates canonical report JSON files (`report`).
+- **Summary Visualizer (`Summarize`)**: Generates human-readable console metrics and track breakdown summaries.
+- **Invariant Verifier (`Validate`)**: Enforces 4 formal data integrity invariants across source, result, and report datasets.
+- **Artifact Generator (`GenerateReport`)**: Persists canonical JSON audit reports using atomic file operations.
 
 ### 2.5 Provider Adapters (`internal/spotify`, `internal/ytmusic`)
-- **`internal/spotify`**: Encapsulates Spotify playlist file I/O (JSON/CSV) as well as live Web Player GraphQL API integration.
-- **`internal/ytmusic`**: Encapsulates authenticated Innertube API communication with SAPISID authorization header generation and response parsing.
+- **`internal/spotify`**: Manages Spotify playlist file I/O (JSON/CSV) and Web Player GraphQL API integration.
+- **`internal/ytmusic`**: Handles authenticated Innertube API communication with dynamic `SAPISIDHASH` header generation, search query execution, batch additions/removals, and continuation token recursion.
 
 ### 2.6 Authentication & Infrastructure Layer (`internal/auth`, `internal/config`)
-- **`internal/auth`**: Isolated browser lifecycle management via CDP, token/cookie probes, TOTP token signature generation, and secure file permission enforcement (0600).
-- **`internal/config`**: Global application configuration, environment variable precedence, and standardized file path resolutions.
+- **`internal/auth`**: Manages Chromium browser lifecycle via CDP over direct loopback WebSocket, extracts session cookies, generates dynamic TOTP tokens, and maintains secured credential storage.
+- **`internal/config`**: Resolves global application configuration, environment variable cascades, and standardized file paths.
+
+---
+
+## 3. Dependency Graph & Data Flow
+
+```
+[User Command] ──> cmd/playlistsync
+                         │
+                         ▼
+                  internal/engine (Syncer, Diff, Review)
+                   │             │               │
+      ┌────────────┘             │               └────────────┐
+      ▼                          ▼                            ▼
+internal/spotify        internal/ytmusic              internal/report
+ (Reader, Client)        (Innertube Client)          (Reporter, Validator)
+      │                          │                            │
+      └────────────┬─────────────┘                            │
+                   ▼                                          │
+             internal/auth                                    │
+        (CDP, Session, Proxy)                                 │
+                   │                                          │
+                   └──────────────────┬───────────────────────┘
+                                      ▼
+                                internal/model
+```

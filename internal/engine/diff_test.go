@@ -1133,3 +1133,368 @@ func TestShortTitleSafetyGate(t *testing.T) {
 	}
 }
 
+func TestComputeDiff_NoDuplicateVideoIDAssignment(t *testing.T) {
+	sp := &model.SpotifyPlaylist{
+		Tracks: []model.SpotifyTrack{
+			{Index: 1, Title: "Song One", Artists: []string{"Artist 1"}},
+			{Index: 2, Title: "Song One", Artists: []string{"Artist 1"}},
+		},
+	}
+	yt := &model.YTMPlaylist{
+		Tracks: []model.YTMTrack{
+			{VideoID: "vid_shared_1", Title: "Song One", Artists: []string{"Artist 1"}},
+		},
+	}
+	mapping := map[int]string{}
+
+	plan := engine.ComputeDiff(sp, yt, mapping)
+
+	if len(plan.Matched) != 1 {
+		t.Fatalf("expected exactly 1 matched track, got %d", len(plan.Matched))
+	}
+	if plan.Matched[0].TargetTrackID != "vid_shared_1" {
+		t.Errorf("expected matched vid_shared_1, got %s", plan.Matched[0].TargetTrackID)
+	}
+	if len(plan.MissingInYTM) != 1 {
+		t.Fatalf("expected 1 missing track for the second duplicate source track, got %d", len(plan.MissingInYTM))
+	}
+	if plan.MissingInYTM[0].Index != 2 {
+		t.Errorf("expected missing track index 2, got %d", plan.MissingInYTM[0].Index)
+	}
+	if len(plan.ExtraInYTM) != 0 {
+		t.Errorf("expected 0 extra in YTM, got %d", len(plan.ExtraInYTM))
+	}
+}
+
+func TestCalculateTrackScore_RemasterAndEditionTags(t *testing.T) {
+	cases := []struct {
+		name       string
+		title1     string
+		artists1   []string
+		dur1       string
+		title2     string
+		artists2   []string
+		dur2       string
+		shouldPass bool
+	}{
+		{
+			name:       "Remastered 2024 in candidate title",
+			title1:     "Hotel California",
+			artists1:   []string{"Eagles"},
+			dur1:       "6:30",
+			title2:     "Hotel California (2024 Remaster)",
+			artists2:   []string{"Eagles"},
+			dur2:       "6:31",
+			shouldPass: true,
+		},
+		{
+			name:       "Deluxe Edition in candidate title",
+			title1:     "Viva La Vida",
+			artists1:   []string{"Coldplay"},
+			dur1:       "4:01",
+			title2:     "Viva La Vida - Deluxe Edition",
+			artists2:   []string{"Coldplay"},
+			dur2:       "4:02",
+			shouldPass: true,
+		},
+		{
+			name:       "Anniversary Edition in candidate title",
+			title1:     "Bohemian Rhapsody",
+			artists1:   []string{"Queen"},
+			dur1:       "5:55",
+			title2:     "Bohemian Rhapsody (40th Anniversary Edition)",
+			artists2:   []string{"Queen"},
+			dur2:       "5:55",
+			shouldPass: true,
+		},
+		{
+			name:       "Remaster in source and candidate",
+			title1:     "Heroes - 2017 Remaster",
+			artists1:   []string{"David Bowie"},
+			dur1:       "6:10",
+			title2:     "Heroes (Remastered)",
+			artists2:   []string{"David Bowie"},
+			dur2:       "6:11",
+			shouldPass: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			score := engine.CalculateTrackScore(tc.title1, tc.artists1, tc.dur1, tc.title2, tc.artists2, tc.dur2)
+			passed := score >= engine.ConfidenceThreshold
+			if passed != tc.shouldPass {
+				t.Errorf("CalculateTrackScore(%q vs %q) = %d (passed=%v, want %v)", tc.title1, tc.title2, score, passed, tc.shouldPass)
+			}
+		})
+	}
+}
+
+func TestCalculateTrackScore_FeaturingAndArtistDelimiterVariants(t *testing.T) {
+	cases := []struct {
+		name       string
+		title1     string
+		artists1   []string
+		title2     string
+		artists2   []string
+		dur        string
+		shouldPass bool
+	}{
+		{
+			name:       "Feat in bracket on candidate",
+			title1:     "Levitating",
+			artists1:   []string{"Dua Lipa", "DaBaby"},
+			title2:     "Levitating (feat. DaBaby)",
+			artists2:   []string{"Dua Lipa"},
+			dur:        "3:23",
+			shouldPass: true,
+		},
+		{
+			name:       "Featuring with slash delimiter",
+			title1:     "Save Your Tears",
+			artists1:   []string{"The Weeknd", "Ariana Grande"},
+			title2:     "Save Your Tears (Remix) - The Weeknd / Ariana Grande",
+			artists2:   []string{"The Weeknd"},
+			dur:        "3:11",
+			shouldPass: true,
+		},
+		{
+			name:       "Chinese conjunction delimiter 和 / 与 / 、",
+			title1:     "珊瑚海",
+			artists1:   []string{"周杰伦", "Lara梁心颐"},
+			title2:     "周杰伦 和 Lara 梁心颐 - 珊瑚海",
+			artists2:   []string{"周杰伦"},
+			dur:        "4:16",
+			shouldPass: true,
+		},
+		{
+			name:       "Ampersand delimiter",
+			title1:     "Stay",
+			artists1:   []string{"The Kid LAROI", "Justin Bieber"},
+			title2:     "The Kid LAROI & Justin Bieber - Stay",
+			artists2:   []string{"The Kid LAROI"},
+			dur:        "2:21",
+			shouldPass: true,
+		},
+		{
+			name:       "Letter x delimiter",
+			title1:     "Cold Heart",
+			artists1:   []string{"Elton John", "Dua Lipa"},
+			title2:     "Elton John x Dua Lipa - Cold Heart (PNAU Remix)",
+			artists2:   []string{"Elton John"},
+			dur:        "3:22",
+			shouldPass: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			score := engine.CalculateTrackScore(tc.title1, tc.artists1, tc.dur, tc.title2, tc.artists2, tc.dur)
+			passed := score >= engine.ConfidenceThreshold
+			if passed != tc.shouldPass {
+				t.Errorf("CalculateTrackScore(%q vs %q) = %d (passed=%v, want %v)", tc.title1, tc.title2, score, passed, tc.shouldPass)
+			}
+		})
+	}
+}
+
+func TestCalculateTrackScore_LiveTrackMatchingSemantics(t *testing.T) {
+	t.Run("Studio source vs Live candidate is penalized and rejected", func(t *testing.T) {
+		score := engine.CalculateTrackScore("Yellow", []string{"Coldplay"}, "4:29", "Yellow (Live in Buenos Aires)", []string{"Coldplay"}, "4:30")
+		if score >= engine.ConfidenceThreshold {
+			t.Errorf("expected score < %d for studio vs live, got %d", engine.ConfidenceThreshold, score)
+		}
+	})
+
+	t.Run("Studio source vs Chinese 现场版 candidate is penalized and rejected", func(t *testing.T) {
+		score := engine.CalculateTrackScore("晴天", []string{"周杰伦"}, "4:29", "周杰伦 - 晴天 [现场版]", []string{"周杰伦"}, "4:30")
+		if score >= engine.ConfidenceThreshold {
+			t.Errorf("expected score < %d for studio vs live, got %d", engine.ConfidenceThreshold, score)
+		}
+	})
+
+	t.Run("Live source vs Live candidate is allowed to match", func(t *testing.T) {
+		score := engine.CalculateTrackScore("Yellow (Live at Glastonbury)", []string{"Coldplay"}, "4:30", "Yellow - Live at Glastonbury", []string{"Coldplay"}, "4:30")
+		if score < engine.ConfidenceThreshold {
+			t.Errorf("expected score >= %d for live vs live, got %d", engine.ConfidenceThreshold, score)
+		}
+	})
+}
+
+func TestCalculateTrackScore_CJKVariantsAndBrackets(t *testing.T) {
+	cases := []struct {
+		name       string
+		title1     string
+		artists1   []string
+		title2     string
+		artists2   []string
+		dur        string
+		shouldPass bool
+	}{
+		{
+			name:       "Traditional Chinese to Simplified Chinese",
+			title1:     "說好不哭",
+			artists1:   []string{"周杰倫", "阿信"},
+			title2:     "说好不哭 (Won't Cry)",
+			artists2:   []string{"周杰伦", "阿信"},
+			dur:        "3:42",
+			shouldPass: true,
+		},
+		{
+			name:       "Fullwidth Lenticular brackets 【】 and 『』",
+			title1:     "夜曲",
+			artists1:   []string{"周杰伦"},
+			title2:     "【官方MV】『夜曲』周杰伦",
+			artists2:   []string{"周杰伦"},
+			dur:        "3:46",
+			shouldPass: true,
+		},
+		{
+			name:       "Corner brackets 「」 and Tortoise shell brackets 〘〙",
+			title1:     "青花瓷",
+			artists1:   []string{"周杰伦"},
+			title2:     "〘高清〙周杰伦「青花瓷」",
+			artists2:   []string{"周杰伦"},
+			dur:        "3:59",
+			shouldPass: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			score := engine.CalculateTrackScore(tc.title1, tc.artists1, tc.dur, tc.title2, tc.artists2, tc.dur)
+			passed := score >= engine.ConfidenceThreshold
+			if passed != tc.shouldPass {
+				t.Errorf("CalculateTrackScore(%q vs %q) = %d (passed=%v, want %v)", tc.title1, tc.title2, score, passed, tc.shouldPass)
+			}
+		})
+	}
+}
+
+func TestCalculateTrackScore_DurationToleranceBuckets(t *testing.T) {
+	baseTitle := "Universal Constant"
+	baseArtist := []string{"Scientist"}
+
+	// Delta <= 3s (+15): Exact match 55 + 30 + 15 = 100
+	s1 := engine.CalculateTrackScore(baseTitle, baseArtist, "3:00", baseTitle, baseArtist, "3:02")
+	if s1 != 100 {
+		t.Errorf("expected 100 for delta <= 3s, got %d", s1)
+	}
+
+	// Delta 5s (+10): 55 + 30 + 10 = 95
+	s2 := engine.CalculateTrackScore(baseTitle, baseArtist, "3:00", baseTitle, baseArtist, "3:05")
+	if s2 != 95 {
+		t.Errorf("expected 95 for delta 5s, got %d", s2)
+	}
+
+	// Delta 12s (+5): 55 + 30 + 5 = 90
+	s3 := engine.CalculateTrackScore(baseTitle, baseArtist, "3:00", baseTitle, baseArtist, "3:12")
+	if s3 != 90 {
+		t.Errorf("expected 90 for delta 12s, got %d", s3)
+	}
+
+	// Delta 20s (0): 55 + 30 + 0 = 85
+	s4 := engine.CalculateTrackScore(baseTitle, baseArtist, "3:00", baseTitle, baseArtist, "3:20")
+	if s4 != 85 {
+		t.Errorf("expected 85 for delta 20s, got %d", s4)
+	}
+
+	// Delta 35s (-25): 55 + 30 - 25 = 60 (< 70 threshold)
+	s5 := engine.CalculateTrackScore(baseTitle, baseArtist, "3:00", baseTitle, baseArtist, "3:35")
+	if s5 != 60 {
+		t.Errorf("expected 60 for delta 35s, got %d", s5)
+	}
+
+	// Delta 60s (-40): 55 + 30 - 40 = 45 (< 70 threshold)
+	s6 := engine.CalculateTrackScore(baseTitle, baseArtist, "3:00", baseTitle, baseArtist, "4:00")
+	if s6 != 45 {
+		t.Errorf("expected 45 for delta 60s, got %d", s6)
+	}
+}
+
+func TestDomainInvariants_DiffPlanAndTrackConservation(t *testing.T) {
+	// Invariant 1: N_source = N_matched + N_missing (Diff conservation)
+	// Invariant 2: Zero duplicate assignments to destination tracks
+	// Invariant 3: Diff plan conservation (every source track fate is accounted for without loss)
+	// Invariant 4: Timestamp RFC3339 validation
+
+	t.Run("Diff Plan Conservation and Zero Duplicate Assignment", func(t *testing.T) {
+		sp := &model.SpotifyPlaylist{
+			Tracks: []model.SpotifyTrack{
+				{Index: 1, Title: "Song A", Artists: []string{"Artist 1"}},
+				{Index: 2, Title: "Song B", Artists: []string{"Artist 2"}},
+				{Index: 3, Title: "Song A", Artists: []string{"Artist 1"}}, // duplicate source title/artist
+				{Index: 4, Title: "Song C", Artists: []string{"Artist 3"}},
+				{Index: 5, Title: "Song D", Artists: []string{"Artist 4"}},
+			},
+		}
+
+		yt := &model.YTMPlaylist{
+			Tracks: []model.YTMTrack{
+				{VideoID: "vid_a1", Title: "Song A", Artists: []string{"Artist 1"}},
+				{VideoID: "vid_c1", Title: "Song C", Artists: []string{"Artist 3"}},
+				{VideoID: "vid_extra", Title: "Extra Song", Artists: []string{"Extra Artist"}},
+			},
+		}
+
+		mapping := map[int]string{
+			2: "vid_b_manual", // manual override mapping
+		}
+
+		plan := engine.ComputeDiff(sp, yt, mapping)
+
+		// 1. Total Source Conservation: N_source == N_matched + N_missing
+		nSource := len(sp.Tracks)
+		nMatched := len(plan.Matched)
+		nMissing := len(plan.MissingInYTM)
+		if nSource != nMatched+nMissing {
+			t.Fatalf("Invariant 1 violation: N_source (%d) != N_matched (%d) + N_missing (%d)", nSource, nMatched, nMissing)
+		}
+
+		// 2. Diff Plan Conservation: Every 1-based source index [1..N_source] is uniquely present in either Matched or Missing
+		accountedIndices := make(map[int]int)
+		for _, m := range plan.Matched {
+			accountedIndices[m.Index]++
+		}
+		for _, m := range plan.MissingInYTM {
+			accountedIndices[m.Index]++
+		}
+
+		for idx := 1; idx <= nSource; idx++ {
+			if count := accountedIndices[idx]; count != 1 {
+				t.Errorf("Invariant 3 violation: source track index %d appeared %d times in diff plan partitions (want exactly 1)", idx, count)
+			}
+		}
+
+		// 3. Zero Duplicate Destination Assignment: No VideoID is matched to multiple tracks
+		usedVideoIDs := make(map[string]int)
+		for _, m := range plan.Matched {
+			if m.TargetTrackID != "" {
+				usedVideoIDs[m.TargetTrackID]++
+				if usedVideoIDs[m.TargetTrackID] > 1 {
+					t.Errorf("Invariant 2 violation: duplicate VideoID %q assigned to multiple source tracks", m.TargetTrackID)
+				}
+			}
+		}
+
+		// 4. Extra tracks in destination are correctly partitioned
+		if len(plan.ExtraInYTM) != 1 || plan.ExtraInYTM[0].VideoID != "vid_extra" {
+			t.Errorf("expected 1 extra track with VideoID vid_extra, got %+v", plan.ExtraInYTM)
+		}
+	})
+
+	t.Run("Timestamp RFC3339 Invariant Validation", func(t *testing.T) {
+		sampleTimestamps := []string{
+			time.Now().UTC().Format(time.RFC3339),
+			"2026-01-01T12:00:00Z",
+			"2026-02-15T08:30:45+08:00",
+		}
+		for _, ts := range sampleTimestamps {
+			if _, err := time.Parse(time.RFC3339, ts); err != nil {
+				t.Errorf("Invariant 4 violation: timestamp %q is not valid RFC3339: %v", ts, err)
+			}
+		}
+	})
+}
+
+

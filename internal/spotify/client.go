@@ -32,7 +32,6 @@ type Client struct {
 // SpotifyClient defines the contract for live Spotify Web Player, Partner, and Web API operations.
 type SpotifyClient interface {
 	FindPlaylist(nameOrIDOrURL string) (*model.SpotifyPlaylist, error)
-	FetchPlaylistFromGraphQL(playlistID string) (*model.SpotifyPlaylist, error)
 	GetPlaylist(playlistID string) (*model.SpotifyPlaylist, error)
 	GetCurrentUser() (string, error)
 	CreatePlaylist(name, description string) (string, error)

@@ -151,7 +151,7 @@ func CheckAuthentication(platform Platform, authPath string, proxyURL string) (*
 		if authPath == "" {
 			authPath = DefaultYTMAuthPath
 		}
-		return ValidateYTMCookie(filepath.Clean(authPath), proxyURL)
+		return ValidateYTMAuth(filepath.Clean(authPath), proxyURL)
 	default:
 		return nil, fmt.Errorf("unsupported platform for authentication check: %s", platform)
 	}

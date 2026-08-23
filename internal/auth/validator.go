@@ -365,8 +365,8 @@ func parseYTMAuthResponse(body []byte) (bool, string, error) {
 	return false, "", fmt.Errorf("youtube music session is unauthenticated: no authenticated user context found")
 }
 
-// ValidateYTMCookie loads and validates YouTube Music credentials from file
-func ValidateYTMCookie(path string, proxyURL string) (*AuthStatus, error) {
+// ValidateYTMAuth loads and validates YouTube Music credentials from file path
+func ValidateYTMAuth(path string, proxyURL string) (*AuthStatus, error) {
 	cleanPath := filepath.Clean(path)
 	data, err := os.ReadFile(cleanPath)
 	if err != nil {
@@ -400,6 +400,11 @@ func ValidateYTMCookie(path string, proxyURL string) (*AuthStatus, error) {
 	}
 	status.Path = cleanPath
 	return status, nil
+}
+
+// ValidateYTMCookie is an alias for ValidateYTMAuth for backward compatibility
+func ValidateYTMCookie(path string, proxyURL string) (*AuthStatus, error) {
+	return ValidateYTMAuth(path, proxyURL)
 }
 
 // ValidateYTMCookieString validates raw cookie headers against YouTube Music Innertube API

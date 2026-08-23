@@ -88,7 +88,7 @@ type SyncConfig struct {
 // Syncer handles the end-to-end sync workflow
 type Syncer struct {
 	cfg SyncConfig
-	yt  *ytmusic.Client
+	yt  ytmusic.YouTubeMusicClient
 }
 
 // NewSyncer initializes a new Syncer instance
@@ -1162,7 +1162,7 @@ type spCandidateResolution struct {
 	topOptions      []ReviewOption
 }
 
-func resolveSpotifyCandidate(spClient *spotify.Client, yTrack model.YTMTrack, index int) spCandidateResolution {
+func resolveSpotifyCandidate(spClient spotify.SpotifyClient, yTrack model.YTMTrack, index int) spCandidateResolution {
 	queries := generateYTMToSpotifyQueries(yTrack)
 	var bestCand *model.SpotifyTrack
 	bestScore := 0
@@ -1249,7 +1249,7 @@ func resolveSpotifyCandidate(spClient *spotify.Client, yTrack model.YTMTrack, in
 	}
 }
 
-func resolveMissingSpotifyCandidatesConcurrently(spClient *spotify.Client, unmatchedTracks []struct {
+func resolveMissingSpotifyCandidatesConcurrently(spClient spotify.SpotifyClient, unmatchedTracks []struct {
 	index int
 	track model.YTMTrack
 }, concurrency int) []spCandidateResolution {

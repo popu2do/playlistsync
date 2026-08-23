@@ -95,8 +95,12 @@ var _ Reporter = (*defaultReporter)(nil)
 
 // Summarize prints human-readable migration summary
 func Summarize(spotifyPath, resultPath string) error {
+	targetPath := resultPath
+	if targetPath == "" {
+		targetPath = spotifyPath
+	}
 	result, err := readJSON[model.SyncResult](
-		resultPath,
+		targetPath,
 		"migration result not found at %s. Run 'playlistsync sync <playlist_name>' first",
 		"corrupted migration result file %s: %w",
 	)
@@ -132,10 +136,10 @@ func Summarize(spotifyPath, resultPath string) error {
 }
 
 // Validate checks integrity of migration artifacts
-func Validate(spotifyPath, resultPath, reportPath string) error {
+func Validate(sourcePath, resultPath, reportPath string) error {
 	var sourceTotal int
 	sp, err := readJSON[model.SpotifyPlaylist](
-		spotifyPath,
+		sourcePath,
 		"source playlist file not found at %s",
 		"corrupted playlist file %s: %w",
 	)
@@ -144,12 +148,12 @@ func Validate(spotifyPath, resultPath, reportPath string) error {
 	} else {
 		// Attempt parsing as YouTube Music source playlist for bidirectional migrations
 		ytm, ytmErr := readJSON[model.YTMPlaylist](
-			spotifyPath,
+			sourcePath,
 			"source playlist file not found at %s",
 			"corrupted playlist file %s: %w",
 		)
 		if ytmErr != nil {
-			return fmt.Errorf("read source playlist at %s: %w", spotifyPath, err)
+			return fmt.Errorf("read source playlist at %s: %w", sourcePath, err)
 		}
 		sourceTotal = len(ytm.Tracks)
 	}
@@ -181,7 +185,7 @@ func Validate(spotifyPath, resultPath, reportPath string) error {
 
 	sourceCount := res.TotalSourceTracks
 
-	check(sourceCount == sourceTotal, "source_total mismatch (source tracks: %d in %s != result TotalTracks: %d)", sourceTotal, spotifyPath, sourceCount)
+	check(sourceCount == sourceTotal, "source_total mismatch (source tracks: %d in %s != result TotalTracks: %d)", sourceTotal, sourcePath, sourceCount)
 	check(res.AddedTracks >= 0 && res.SkippedTracks >= 0, "negative track counts in result (added: %d, skipped: %d)", res.AddedTracks, res.SkippedTracks)
 	check(res.TotalSourceTracks == res.AddedTracks+res.SkippedTracks,
 		"Invariant 1 violation (total conservation): TotalSourceTracks (%d) != AddedTracks (%d) + SkippedTracks (%d)",

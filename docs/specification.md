@@ -1,10 +1,10 @@
-# Engineering Specification: playlistsync (Go)
+# Engineering Specification: playlistsync
 
 ## 1. CLI Interface Specification
 
-### 1.1 Binary: `playlistsync`
+### 1.1 Executable Binary
 
-The primary CLI executable is `bin/playlistsync` (compiled from `cmd/playlistsync/main.go`).
+The primary CLI binary is `playlistsync` (built from `cmd/playlistsync/main.go`).
 
 ```bash
 playlistsync <command> [arguments] [options]
@@ -12,33 +12,33 @@ playlistsync <command> [arguments] [options]
 
 ### 1.2 Subcommands
 
-| Subcommand | Purpose | Parameters |
-| :--- | :--- | :--- |
-| `sync <playlist_name>` | Synchronize a playlist bidirectionally between platforms (`spotify` <-> `youtube-music`) | Positional: `<playlist_name>` (Required)<br>Flags: `--from`, `--to`, `--proxy`, `--clean-extra`, `--yes` / `-y`, `--non-interactive`, `--concurrency` / `-c`, `--output-dir`, `--json`, `--playlist-id` / `--id` |
-| `login [platform]` | Authenticate credentials via automated browser CDP flow (`spotify`, `youtube-music`, `all`) | Positional: `[platform]` (Optional, defaults to `all`)<br>Flags: `--force`, `--proxy` |
-| `inspect <playlist_name>` | Display human-readable migration summary and track status (alias: `status`, `summary`) | Positional: `<playlist_name>` (Required)<br>Flags: `--output-dir` |
-| `verify <playlist_name>` | Run invariant integrity checks on source, result, and report datasets (alias: `validate`) | Positional: `<playlist_name>` (Required)<br>Flags: `--output-dir` |
-| `report <playlist_name>` | Regenerate canonical migration report JSON artifact | Positional: `<playlist_name>` (Required)<br>Flags: `--output-dir` |
+| Subcommand | Aliases | Description | Positional Arguments |
+| :--- | :--- | :--- | :--- |
+| `sync` | - | Synchronize a playlist between platforms with differential reconciliation | `<playlist_name>` (Required) |
+| `login` | - | Authenticate credentials via automated browser CDP flow | `[platform]` (Optional: `spotify`, `youtube-music`, `all`; default: `all`) |
+| `inspect` | `status`, `summary` | Display human-readable migration summary and track status | `<playlist_name>` (Required) |
+| `verify` | `validate` | Run invariant integrity checks on source, result, and report datasets | `<playlist_name>` (Required) |
+| `report` | - | Regenerate canonical migration report JSON artifact | `<playlist_name>` (Required) |
 
-### 1.3 Command Options & Flags
+### 1.3 Flag Matrix
 
-| Flag / Option | Shorthand | Default Value | Scope | Description |
+| Flag / Option | Shorthand | Default Value | Applicable Subcommands | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `--from` | - | `spotify` | `sync` | Source platform (`spotify` or `youtube-music`; aliases: `spo`, `sp`, `youtube`, `ytmusic`, `ytm`, `yt`) |
-| `--to` | - | `youtube-music` | `sync` | Destination platform (`youtube-music` or `spotify`) |
-| `--proxy` | - | System auto-detect | `sync`, `login` | Explicit HTTP/HTTPS proxy URL (overrides environment and registry) |
-| `--clean-extra` | - | `true` | `sync` | When true, automatically prunes unmapped extraneous tracks in destination playlist |
+| `--from` | - | `spotify` | `sync` | Source platform (`spotify`, `youtube-music`; aliases: `spo`, `sp`, `youtube`, `ytmusic`, `ytm`, `yt`) |
+| `--to` | - | `youtube-music` | `sync` | Destination platform (`youtube-music`, `spotify`) |
+| `--proxy` | - | System auto-detect | `sync`, `login` | Explicit HTTP/HTTPS proxy URL (e.g. `http://127.0.0.1:7890`) |
+| `--clean-extra` | - | `true` | `sync` | Automatically prune unmapped extraneous tracks from the destination playlist |
 | `--yes` | `-y` | `false` | `sync` | Automatically answer yes to all confirmation prompts |
-| `--non-interactive`| - | `false` | `sync` | Run in non-interactive batch mode (equivalent to auto-confirm) |
-| `--concurrency` | `-c` | `6` | `sync` | Number of concurrent worker goroutines for track candidate search & matching |
-| `--output-dir` | - | `output/` | Global | Custom working and artifact storage directory |
-| `--json` | - | `""` | `sync` | Direct path to local source playlist JSON file |
-| `--playlist-id` / `--id` | - | `""` | `sync` | Explicit destination playlist ID to synchronize into |
-| `--force` | - | `false` | `login` | Force re-authentication bypassing cached credential validation |
+| `--non-interactive` | - | `false` | `sync` | Run in non-interactive batch mode (equivalent to auto-confirm) |
+| `--concurrency` | `-c` | `6` | `sync` | Number of concurrent worker goroutines for track search and candidate evaluation |
+| `--output-dir` | - | `output/` | `sync`, `inspect`, `verify`, `report` | Custom working and artifact storage directory |
+| `--json` | - | `""` | `sync` | Direct path to a local source playlist JSON file |
+| `--playlist-id` | `--id` | `""` | `sync` | Explicit destination playlist ID to synchronize into |
+| `--force` | - | `false` | `login` | Force interactive browser re-authentication, bypassing cached credential validation |
 
 ### 1.4 Exit Codes
 
-| Exit Code | Semantic Meaning |
-| :--- | :--- |
-| `0` | Successful execution / Validation passed / Help displayed |
-| `1` | Command execution error, invariant check failure, or unrecoverable error |
+| Exit Code | Semantic Meaning | Scenarios |
+| :--- | :--- | :--- |
+| `0` | Success | Command completed successfully, validation checks passed, or help information displayed |
+| `1` | Failure | Execution error, network/auth failure, invalid arguments, or invariant verification failure |
