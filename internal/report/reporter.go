@@ -5,48 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
+	"playlistsync/internal/fileutil"
 	"playlistsync/internal/model"
-	"runtime"
 	"strings"
 )
 
 // writeFileAtomic safely writes data to targetPath via a temporary file and atomic rename.
 func writeFileAtomic(targetPath string, data []byte, perm os.FileMode) error {
-	cleanTarget := filepath.Clean(targetPath)
-	dir := filepath.Dir(cleanTarget)
-
-	if stat, err := os.Stat(dir); err != nil || !stat.IsDir() {
-		return fmt.Errorf("target directory does not exist: %s", dir)
-	}
-
-	tmpFile, err := os.CreateTemp(dir, "tmp-*")
-	if err != nil {
-		return fmt.Errorf("create temp file in %s: %w", dir, err)
-	}
-	tmpName := tmpFile.Name()
-	defer func() {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpName)
-	}()
-
-	if _, err := tmpFile.Write(data); err != nil {
-		return fmt.Errorf("write temp file: %w", err)
-	}
-	if err := tmpFile.Sync(); err != nil {
-		return fmt.Errorf("sync temp file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("close temp file: %w", err)
-	}
-
-	if runtime.GOOS == "windows" {
-		_ = os.Remove(cleanTarget)
-	}
-	if err := os.Rename(tmpName, cleanTarget); err != nil {
-		return fmt.Errorf("atomic rename %s -> %s: %w", tmpName, cleanTarget, err)
-	}
-	return os.Chmod(cleanTarget, perm)
+	return fileutil.WriteFileAtomic(targetPath, data, perm)
 }
 
 // readJSON reads and unmarshals a JSON file into target T, formatting consistent errors.
@@ -217,6 +183,12 @@ func Validate(sourcePath, resultPath, reportPath string) error {
 		check(strings.TrimSpace(a.TargetTrackID) != "", "added track at index %d (title %q) has empty targetTrackId/resourceId", a.Index, a.Title)
 		check(strings.TrimSpace(a.Title) != "", "added track [%d] has empty title", i)
 		check(a.Index >= 1, "added track [%d] has invalid non-positive index %d", i, a.Index)
+	}
+
+	// Invariant 5: Order concordance metric validity
+	if res.SyncOrder {
+		check(res.OrderConcordanceRate >= 0.0 && res.OrderConcordanceRate <= 1.0,
+			"invalid order concordance rate %.2f (must be between 0.0 and 1.0)", res.OrderConcordanceRate)
 	}
 
 	if len(failures) > 0 {

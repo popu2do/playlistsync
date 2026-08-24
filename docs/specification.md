@@ -28,6 +28,7 @@ playlistsync <command> [arguments] [options]
 | `--to` | - | `youtube-music` | `sync` | Destination platform (`youtube-music`, `spotify`) |
 | `--proxy` | - | System auto-detect | `sync`, `login` | Explicit HTTP/HTTPS proxy URL (e.g. `http://127.0.0.1:7890`) |
 | `--clean-extra` | - | `true` | `sync` | Automatically prune unmapped extraneous tracks from the destination playlist |
+| `--sync-order` | - | `true` | `sync` | Preserve and synchronize exact playlist track sequence across platforms |
 | `--yes` | `-y` | `false` | `sync` | Automatically answer yes to all confirmation prompts |
 | `--non-interactive` | - | `false` | `sync` | Run in non-interactive batch mode (equivalent to auto-confirm) |
 | `--concurrency` | `-c` | `6` | `sync` | Number of concurrent worker goroutines for track search and candidate evaluation |

@@ -47,6 +47,7 @@ type YouTubeMusicClient interface {
 	GetPlaylist(playlistID string) (*model.YTMPlaylist, error)
 	AddPlaylistItems(playlistID string, videoIDs []string) error
 	RemovePlaylistItems(playlistID string, items []model.YTMTrack) error
+	ReorderPlaylistItems(playlistID string, moves []model.YTMReorderMove) error
 	SearchSong(query string) ([]model.YTMSearchResult, error)
 	CreatePlaylist(title, description, privacy string) (string, error)
 	FindPlaylistByTitle(title string) (*model.YTMPlaylistSummary, error)
@@ -371,6 +372,46 @@ func (c *Client) RemovePlaylistItems(playlistID string, items []model.YTMTrack) 
 		}
 
 		if end < len(actions) {
+			time.Sleep(300 * time.Millisecond)
+		}
+	}
+	return nil
+}
+
+// ReorderPlaylistItems executes a batch of in-place track move operations on a YouTube Music playlist
+func (c *Client) ReorderPlaylistItems(playlistID string, moves []model.YTMReorderMove) error {
+	if len(moves) == 0 {
+		return nil
+	}
+
+	batchSize := 20
+	for i := 0; i < len(moves); i += batchSize {
+		end := i + batchSize
+		if end > len(moves) {
+			end = len(moves)
+		}
+		chunk := moves[i:end]
+
+		actions := make([]map[string]interface{}, 0, len(chunk))
+		for _, m := range chunk {
+			action := map[string]interface{}{
+				"action":     "ACTION_MOVE_VIDEO_AFTER",
+				"setVideoId": m.SetVideoID,
+			}
+			if m.MovedSetVideoIDPredecessor != "" {
+				action["movedSetVideoIdPredecessor"] = m.MovedSetVideoIDPredecessor
+			}
+			actions = append(actions, action)
+		}
+
+		payload := clientContext("", "")
+		payload["playlistId"] = playlistID
+		payload["actions"] = actions
+
+		if _, err := c.post(EndpointEditPlaylist, payload); err != nil {
+			return fmt.Errorf("reorder items batch %d-%d: %w", i, end, err)
+		}
+		if end < len(moves) {
 			time.Sleep(300 * time.Millisecond)
 		}
 	}

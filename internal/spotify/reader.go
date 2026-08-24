@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"playlistsync/internal/config"
+	"playlistsync/internal/fileutil"
 	"playlistsync/internal/model"
 	"strconv"
 	"strings"
@@ -264,22 +265,17 @@ func WritePlaylistJSON(filePath string, pl *model.SpotifyPlaylist) error {
 		return fmt.Errorf("marshal spotify json: %w", err)
 	}
 
-	return os.WriteFile(filePath, append(data, '\n'), 0644)
+	return fileutil.WriteFileAtomic(filePath, append(data, '\n'), 0644)
 }
 
-// WritePlaylistCSV exports a Spotify playlist to a CSV file
+// WritePlaylistCSV exports a Spotify playlist to a CSV file atomically
 func WritePlaylistCSV(filePath string, pl *model.SpotifyPlaylist) error {
-	f, err := os.Create(filePath)
-	if err != nil {
-		return fmt.Errorf("create spotify csv: %w", err)
-	}
-	defer f.Close()
-
-	if _, err := f.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
+	var buf bytes.Buffer
+	if _, err := buf.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
 		return fmt.Errorf("write utf-8 bom: %w", err)
 	}
 
-	writer := csv.NewWriter(f)
+	writer := csv.NewWriter(&buf)
 	if err := writer.Write([]string{"index", "title", "artists", "album", "duration", "query", "spotifyUrl"}); err != nil {
 		return err
 	}
@@ -304,5 +300,5 @@ func WritePlaylistCSV(filePath string, pl *model.SpotifyPlaylist) error {
 		return fmt.Errorf("flush csv writer: %w", err)
 	}
 
-	return nil
+	return fileutil.WriteFileAtomic(filePath, buf.Bytes(), 0644)
 }

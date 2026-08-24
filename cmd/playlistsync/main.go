@@ -333,6 +333,7 @@ Synchronize playlists between Spotify and YouTube Music.`,
 		syncTo             string
 		syncProxy          string
 		syncCleanExtra     bool
+		syncSyncOrder      bool
 		syncPlaylistID     string
 		syncID             string
 		syncAutoYes        bool
@@ -425,6 +426,7 @@ Supported aliases: spotify/spo/sp, youtube-music/ytmusic/youtube/ytm/yt`,
 				SpotifyAuthPath:  spAuthPath,
 				ProxyURL:         proxyURL,
 				CleanExtra:       cleanExtra,
+				SyncOrder:        syncSyncOrder,
 				AutoYes:          autoYes,
 				Concurrency:      syncConcurrency,
 				PlaylistJSONPath: syncJSONPath,
@@ -458,6 +460,7 @@ Supported aliases: spotify/spo/sp, youtube-music/ytmusic/youtube/ytm/yt`,
 	syncCmd.Flags().StringVar(&syncTo, "to", "youtube-music", "Target platform: youtube-music | spotify")
 	syncCmd.Flags().StringVar(&syncProxy, "proxy", "", "Proxy URL (defaults to system proxy)")
 	syncCmd.Flags().BoolVar(&syncCleanExtra, "clean-extra", true, "Remove extraneous tracks in destination")
+	syncCmd.Flags().BoolVar(&syncSyncOrder, "sync-order", true, "Synchronize track sequence/order between source and target playlists")
 	syncCmd.Flags().StringVar(&syncPlaylistID, "playlist-id", "", "Destination playlist ID")
 	syncCmd.Flags().StringVar(&syncID, "id", "", "Destination playlist ID (short)")
 	syncCmd.Flags().BoolVarP(&syncAutoYes, "yes", "y", false, "Automatic yes to prompts")

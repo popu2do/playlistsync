@@ -13,6 +13,7 @@ This document captures the foundational architectural decisions, technical trade
 - [ADR-005: Differential Set Reconciliation Engine & Extraneous Track Pruning Policy](#adr-005-differential-set-reconciliation-engine--extraneous-track-pruning-policy)
 - [ADR-006: Adaptive Proxy Cascade & Direct Loopback CDP Isolation](#adr-006-adaptive-proxy-cascade--direct-loopback-cdp-isolation)
 - [ADR-007: Invariant Verification, Deterministic Artifact Persistence & Traceable Audit Design](#adr-007-invariant-verification-deterministic-artifact-persistence--traceable-audit-design)
+- [ADR-008: LIS-Based Minimal Mutation Partial Order Synchronization](#adr-008-lis-based-minimal-mutation-partial-order-synchronization)
 
 ---
 
@@ -214,3 +215,32 @@ All persistent outputs (`_source.json`, `_result.json`, `_report.json`) are writ
 ### Consequences
 - **Positive**: Complete auditability, fail-fast consistency verification, and zero risk of corrupted output files.
 - **Negative**: Requires disk write access for the designated `output/` directory.
+
+---
+
+## ADR-008: LIS-Based Minimal Mutation Partial Order Synchronization
+
+### Status
+Accepted
+
+### Context
+Cross-platform playlist synchronization requires preserving the exact track sequence curated by users and artists. Naive full recreation destroys playlist metadata and sharing URLs, while naive append-only insertion scrambles the relative order when mixed with interactive review additions or incremental syncs.
+
+### Decision Drivers
+- **Order Fidelity**: Maintain exact source track order and relative partial order even when certain tracks are skipped or reviewed.
+- **Minimal Mutation (LIS)**: Use the Longest Increasing Subsequence (LIS) algorithm to calculate the minimum move operations required ($N - |LIS|$), avoiding excessive platform API calls and rate limits.
+- **Protocol Encapsulation**: Utilize YouTube Music InnerTube `ACTION_MOVE_VIDEO_AFTER` with `setVideoId` references, and Spotify Web API `PUT /v1/playlists/{id}/tracks` atomic replace.
+
+### Decision
+1. Default `--sync-order=true` across all synchronization flows.
+2. Maintain source index order when constructing batch addition queues.
+3. Compute `ReorderPlan` using LIS in `internal/engine/reorder.go` and execute in-place reordering when existing target playlists deviate from the source order.
+4. Enforce **Invariant 5 (Order Concordance Invariant)**: $\text{OrderConcordanceRate} \in [0.0, 1.0]$.
+
+### Alternatives Considered
+- *Full Delete & Recreate*: Heavy API footprint, resets playlist creation dates and follower metrics.
+- *Unordered Append-Only*: Destroys musical sequence and narrative album structures.
+
+### Consequences
+- **Positive**: 100% order fidelity with zero extra API overhead on initial syncs and minimal moves on incremental syncs.
+- **Negative**: Adds $O(N \log N)$ algorithm computation in memory prior to mutation dispatch.

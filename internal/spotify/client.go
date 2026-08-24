@@ -36,6 +36,7 @@ type SpotifyClient interface {
 	GetCurrentUser() (string, error)
 	CreatePlaylist(name, description string) (string, error)
 	AddTracksToPlaylist(playlistID string, trackURIs []string) error
+	ReplacePlaylistTracks(playlistID string, trackURIs []string) error
 	RemoveTracksFromPlaylist(playlistID string, trackURIs []string) error
 	SearchTrack(query string) ([]model.SpotifyTrack, error)
 }
@@ -749,6 +750,42 @@ func (c *Client) post(endpoint string, payload interface{}) ([]byte, error) {
 	return bodyBytes, nil
 }
 
+func (c *Client) put(endpoint string, payload interface{}) ([]byte, error) {
+	var bodyReader io.Reader
+	if payload != nil {
+		bodyBytes, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("marshal request payload: %w", err)
+		}
+		bodyReader = bytes.NewReader(bodyBytes)
+	}
+
+	req, err := http.NewRequest("PUT", endpoint, bodyReader)
+	if err != nil {
+		return nil, fmt.Errorf("create spotify request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute spotify request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read spotify response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return bodyBytes, fmt.Errorf("spotify API returned HTTP %d: %s", resp.StatusCode, auth.SanitizeSensitive(string(bodyBytes)))
+	}
+	return bodyBytes, nil
+}
+
 func (c *Client) delete(endpoint string, payload interface{}) ([]byte, error) {
 	var bodyReader io.Reader
 	if payload != nil {
@@ -838,6 +875,40 @@ func (c *Client) AddTracksToPlaylist(playlistID string, trackURIs []string) erro
 		endpoint := fmt.Sprintf("%s/%s/tracks", EndpointPlaylists, playlistID)
 		if _, err := c.post(endpoint, payload); err != nil {
 			return fmt.Errorf("add tracks to playlist batch %d-%d: %w", i, end, err)
+		}
+	}
+	return nil
+}
+
+// ReplacePlaylistTracks replaces the entire playlist content with the specified URIs in exact order.
+func (c *Client) ReplacePlaylistTracks(playlistID string, trackURIs []string) error {
+	endpoint := fmt.Sprintf("%s/%s/tracks", EndpointPlaylists, playlistID)
+	if len(trackURIs) == 0 {
+		payload := map[string]interface{}{
+			"uris": []string{},
+		}
+		if _, err := c.put(endpoint, payload); err != nil {
+			return fmt.Errorf("clear spotify playlist: %w", err)
+		}
+		return nil
+	}
+
+	firstChunkSize := 100
+	if len(trackURIs) < firstChunkSize {
+		firstChunkSize = len(trackURIs)
+	}
+	firstChunk := trackURIs[:firstChunkSize]
+	payload := map[string]interface{}{
+		"uris": firstChunk,
+	}
+	if _, err := c.put(endpoint, payload); err != nil {
+		return fmt.Errorf("replace spotify tracks batch 0-%d: %w", firstChunkSize, err)
+	}
+
+	if len(trackURIs) > firstChunkSize {
+		remaining := trackURIs[firstChunkSize:]
+		if err := c.AddTracksToPlaylist(playlistID, remaining); err != nil {
+			return fmt.Errorf("append remaining spotify tracks: %w", err)
 		}
 	}
 	return nil

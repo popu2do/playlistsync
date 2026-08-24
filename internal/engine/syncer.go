@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"playlistsync/internal/auth"
 	"playlistsync/internal/config"
+	"playlistsync/internal/fileutil"
 	"playlistsync/internal/model"
 	"playlistsync/internal/spotify"
 	"playlistsync/internal/ytmusic"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -23,39 +23,7 @@ const DefaultSearchConcurrency = 6
 
 // writeFileAtomic safely writes data to targetPath via a temporary file and atomic rename.
 func writeFileAtomic(targetPath string, data []byte, perm os.FileMode) error {
-	cleanTarget := filepath.Clean(targetPath)
-	dir := filepath.Dir(cleanTarget)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("create directory %s: %w", dir, err)
-	}
-
-	tmpFile, err := os.CreateTemp(dir, "tmp-*")
-	if err != nil {
-		return fmt.Errorf("create temp file in %s: %w", dir, err)
-	}
-	tmpName := tmpFile.Name()
-	defer func() {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpName)
-	}()
-
-	if _, err := tmpFile.Write(data); err != nil {
-		return fmt.Errorf("write temp file: %w", err)
-	}
-	if err := tmpFile.Sync(); err != nil {
-		return fmt.Errorf("sync temp file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("close temp file: %w", err)
-	}
-
-	if runtime.GOOS == "windows" {
-		_ = os.Remove(cleanTarget)
-	}
-	if err := os.Rename(tmpName, cleanTarget); err != nil {
-		return fmt.Errorf("atomic rename %s -> %s: %w", tmpName, cleanTarget, err)
-	}
-	return os.Chmod(cleanTarget, perm)
+	return fileutil.WriteFileAtomic(targetPath, data, perm)
 }
 
 // SyncDirection defines the direction of synchronization
@@ -79,6 +47,7 @@ type SyncConfig struct {
 	ProxyURL         string
 	OutputDir        string
 	CleanExtra       bool
+	SyncOrder        bool
 	AutoYes          bool
 	Concurrency      int
 	ConfirmPrompt    func(prompt string) bool
@@ -320,13 +289,7 @@ func (s *Syncer) runSyncSpotifyToYouTube() (*model.SyncResult, error) {
 	for _, t := range ytmPlaylist.Tracks {
 		currentVidSet[t.VideoID] = true
 	}
-	var newVidsToAdd []string
-	for _, vid := range toAddVideoIDs {
-		if !currentVidSet[vid] {
-			newVidsToAdd = append(newVidsToAdd, vid)
-			currentVidSet[vid] = true
-		}
-	}
+	newVidsToAdd := BuildOrderedAddQueue(spPlaylist.Tracks, mapping, currentVidSet)
 
 	if len(newVidsToAdd) > 0 {
 		fmt.Printf("Adding %d missing tracks to YouTube Music playlist...\n", len(newVidsToAdd))
@@ -427,20 +390,75 @@ func (s *Syncer) runSyncSpotifyToYouTube() (*model.SyncResult, error) {
 		}
 	}
 
+	reorderedCount := 0
+	if s.cfg.SyncOrder && len(finalPl.Tracks) > 1 {
+		var desiredVids []string
+		seenDesired := make(map[string]bool)
+		for _, st := range spPlaylist.Tracks {
+			if vid, ok := mapping[st.Index]; ok && vid != "" {
+				if !seenDesired[vid] {
+					desiredVids = append(desiredVids, vid)
+					seenDesired[vid] = true
+				}
+			}
+		}
+
+		var currentMapped []model.YTMTrack
+		for _, t := range finalPl.Tracks {
+			if seenDesired[t.VideoID] {
+				currentMapped = append(currentMapped, t)
+			}
+		}
+
+		if len(currentMapped) == len(desiredVids) && len(desiredVids) > 1 {
+			if moves, planErr := ComputeReorderPlan(currentMapped, desiredVids); planErr == nil && len(moves) > 0 {
+				fmt.Printf("Reordering %d tracks in destination YouTube Music playlist for exact sequence alignment...\n", len(moves))
+				var ytmMoves []model.YTMReorderMove
+				for _, m := range moves {
+					ytmMoves = append(ytmMoves, model.YTMReorderMove{
+						SetVideoID:                 m.SetVideoID,
+						MovedSetVideoIDPredecessor: m.MovedSetVideoIDPredecessor,
+					})
+				}
+				if err := s.yt.ReorderPlaylistItems(playlistID, ytmMoves); err == nil {
+					reorderedCount = len(moves)
+					if refreshedPl, refErr := s.yt.GetPlaylist(playlistID); refErr == nil {
+						finalPl = refreshedPl
+					}
+				}
+			}
+		}
+	}
+
+	var finalVids []string
+	for _, t := range finalPl.Tracks {
+		finalVids = append(finalVids, t.VideoID)
+	}
+	var desiredOrderVids []string
+	for _, st := range spPlaylist.Tracks {
+		if vid, ok := mapping[st.Index]; ok && vid != "" {
+			desiredOrderVids = append(desiredOrderVids, vid)
+		}
+	}
+	concordance := CalculateOrderConcordanceRate(desiredOrderVids, finalVids)
+
 	return s.finalizeSyncResult(syncResultParams{
-		Direction:          DirectionSpotifyToYouTube,
-		SourcePlatform:     "spotify",
-		TargetPlatform:     "youtube-music",
-		TargetPlaylistID:   playlistID,
-		TargetTitle:        finalPl.Title,
-		TargetTrackCount:   len(finalPl.Tracks),
-		TargetDescription:  finalPl.Description,
-		SourcePlaylistName: spPlaylist.PlaylistName,
-		SourcePlaylistURL:  spPlaylist.SourcePlaylistURL,
-		TotalSourceTracks:  len(spPlaylist.Tracks),
-		SkippedTracks:      skippedList,
-		AddedAfterReview:   reviewedAdditions,
-		RemovedExtraTracks: removedList,
+		Direction:            DirectionSpotifyToYouTube,
+		SourcePlatform:       "spotify",
+		TargetPlatform:       "youtube-music",
+		TargetPlaylistID:     playlistID,
+		TargetTitle:          finalPl.Title,
+		TargetTrackCount:     len(finalPl.Tracks),
+		TargetDescription:    finalPl.Description,
+		SourcePlaylistName:   spPlaylist.PlaylistName,
+		SourcePlaylistURL:    spPlaylist.SourcePlaylistURL,
+		TotalSourceTracks:    len(spPlaylist.Tracks),
+		SyncOrder:            s.cfg.SyncOrder,
+		OrderConcordanceRate: concordance,
+		ReorderedCount:       reorderedCount,
+		SkippedTracks:        skippedList,
+		AddedAfterReview:     reviewedAdditions,
+		RemovedExtraTracks:   removedList,
 	}), nil
 }
 
@@ -746,20 +764,62 @@ func (s *Syncer) runSyncYouTubeToSpotify() (*model.SyncResult, error) {
 		}
 	}
 
+	reorderedCount := 0
+	if s.cfg.SyncOrder && len(matchedTracks) > 1 {
+		sort.Slice(matchedTracks, func(i, j int) bool {
+			return matchedTracks[i].Index < matchedTracks[j].Index
+		})
+		var desiredURIs []string
+		seenDesired := make(map[string]bool)
+		for _, m := range matchedTracks {
+			uri := fmt.Sprintf("spotify:track:%s", m.TargetTrackID)
+			if !seenDesired[uri] {
+				desiredURIs = append(desiredURIs, uri)
+				seenDesired[uri] = true
+			}
+		}
+		if len(desiredURIs) > 0 {
+			fmt.Printf("Aligning Spotify playlist tracks to exact source sequence (%d tracks)...\n", len(desiredURIs))
+			if err := spClient.ReplacePlaylistTracks(spPlaylistID, desiredURIs); err == nil {
+				reorderedCount = len(desiredURIs)
+				if refreshedPl, refErr := spClient.GetPlaylist(spPlaylistID); refErr == nil {
+					finalPl = refreshedPl
+				}
+			}
+		}
+	}
+
+	var finalURIs []string
+	for _, t := range finalPl.Tracks {
+		if t.SpotifyURI != "" {
+			finalURIs = append(finalURIs, t.SpotifyURI)
+		} else if t.ID != "" {
+			finalURIs = append(finalURIs, fmt.Sprintf("spotify:track:%s", t.ID))
+		}
+	}
+	var desiredOrderURIs []string
+	for _, m := range matchedTracks {
+		desiredOrderURIs = append(desiredOrderURIs, fmt.Sprintf("spotify:track:%s", m.TargetTrackID))
+	}
+	concordance := CalculateOrderConcordanceRate(desiredOrderURIs, finalURIs)
+
 	return s.finalizeSyncResult(syncResultParams{
-		Direction:          DirectionYouTubeToSpotify,
-		SourcePlatform:     "youtube-music",
-		TargetPlatform:     "spotify",
-		TargetPlaylistID:   spPlaylistID,
-		TargetTitle:        finalPl.PlaylistName,
-		TargetTrackCount:   len(finalPl.Tracks),
-		TargetDescription:  ytmPlaylist.Description,
-		SourcePlaylistName: ytmPlaylist.Title,
-		SourcePlaylistURL:  fmt.Sprintf("https://music.youtube.com/playlist?list=%s", ytmPlaylist.ID),
-		TotalSourceTracks:  len(ytmPlaylist.Tracks),
-		SkippedTracks:      skippedList,
-		AddedAfterReview:   spReviewOutcome.ReviewedAdditions,
-		RemovedExtraTracks: removedList,
+		Direction:            DirectionYouTubeToSpotify,
+		SourcePlatform:       "youtube-music",
+		TargetPlatform:       "spotify",
+		TargetPlaylistID:     spPlaylistID,
+		TargetTitle:          finalPl.PlaylistName,
+		TargetTrackCount:     len(finalPl.Tracks),
+		TargetDescription:    ytmPlaylist.Description,
+		SourcePlaylistName:   ytmPlaylist.Title,
+		SourcePlaylistURL:    fmt.Sprintf("https://music.youtube.com/playlist?list=%s", ytmPlaylist.ID),
+		TotalSourceTracks:    len(ytmPlaylist.Tracks),
+		SyncOrder:            s.cfg.SyncOrder,
+		OrderConcordanceRate: concordance,
+		ReorderedCount:       reorderedCount,
+		SkippedTracks:        skippedList,
+		AddedAfterReview:     spReviewOutcome.ReviewedAdditions,
+		RemovedExtraTracks:   removedList,
 	}), nil
 }
 
@@ -925,19 +985,22 @@ func waitForPlaylistWithTrackCount[T any](expectedMin int, maxAttempts int, init
 }
 
 type syncResultParams struct {
-	Direction          SyncDirection
-	SourcePlatform     string
-	TargetPlatform     string
-	TargetPlaylistID   string
-	TargetTitle        string
-	TargetTrackCount   int
-	TargetDescription  string
-	SourcePlaylistName string
-	SourcePlaylistURL  string
-	TotalSourceTracks  int
-	SkippedTracks      []model.SkippedTrack
-	AddedAfterReview   []model.AddedTrack
-	RemovedExtraTracks []model.RemovedTrack
+	Direction            SyncDirection
+	SourcePlatform       string
+	TargetPlatform       string
+	TargetPlaylistID     string
+	TargetTitle          string
+	TargetTrackCount     int
+	TargetDescription    string
+	SourcePlaylistName   string
+	SourcePlaylistURL    string
+	TotalSourceTracks    int
+	SyncOrder            bool
+	OrderConcordanceRate float64
+	ReorderedCount       int
+	SkippedTracks        []model.SkippedTrack
+	AddedAfterReview     []model.AddedTrack
+	RemovedExtraTracks   []model.RemovedTrack
 }
 
 // finalizeSyncResult encapsulates sorting skipped tracks, calculating metrics, assembling SyncResult,
@@ -967,21 +1030,24 @@ func (s *Syncer) finalizeSyncResult(p syncResultParams) *model.SyncResult {
 	}
 
 	result := &model.SyncResult{
-		Direction:          string(p.Direction),
-		SourcePlatform:     p.SourcePlatform,
-		TargetPlatform:     p.TargetPlatform,
-		PlaylistID:         p.TargetPlaylistID,
-		PlaylistURL:        playlistURL,
-		WebURL:             webURL,
-		Title:              p.TargetTitle,
-		SourcePlaylistURL:  p.SourcePlaylistURL,
-		TotalSourceTracks:  p.TotalSourceTracks,
-		AddedTracks:        matchedOrAdded,
-		SkippedTracks:      len(p.SkippedTracks),
-		Skipped:            p.SkippedTracks,
-		AddedAfterReview:   p.AddedAfterReview,
-		RemovedExtraTracks: p.RemovedExtraTracks,
-		LastSyncedAt:       time.Now().UTC().Format(time.RFC3339),
+		Direction:            string(p.Direction),
+		SourcePlatform:       p.SourcePlatform,
+		TargetPlatform:       p.TargetPlatform,
+		PlaylistID:           p.TargetPlaylistID,
+		PlaylistURL:          playlistURL,
+		WebURL:               webURL,
+		Title:                p.TargetTitle,
+		SourcePlaylistURL:    p.SourcePlaylistURL,
+		TotalSourceTracks:    p.TotalSourceTracks,
+		AddedTracks:          matchedOrAdded,
+		SkippedTracks:        len(p.SkippedTracks),
+		SyncOrder:            p.SyncOrder,
+		OrderConcordanceRate: p.OrderConcordanceRate,
+		ReorderedCount:       p.ReorderedCount,
+		Skipped:              p.SkippedTracks,
+		AddedAfterReview:     p.AddedAfterReview,
+		RemovedExtraTracks:   p.RemovedExtraTracks,
+		LastSyncedAt:         time.Now().UTC().Format(time.RFC3339),
 		Verification: &model.Verification{
 			PageTitle:      p.TargetTitle,
 			PageTrackCount: p.TargetTrackCount,

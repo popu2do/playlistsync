@@ -24,6 +24,12 @@ type YTMPlaylistSummary struct {
 	Title string `json:"title"`
 }
 
+// YTMReorderMove represents an in-place move action in a YouTube Music playlist
+type YTMReorderMove struct {
+	SetVideoID                 string `json:"setVideoId"`
+	MovedSetVideoIDPredecessor string `json:"movedSetVideoIdPredecessor,omitempty"`
+}
+
 // YTMSearchResult represents a candidate returned from YouTube Music search
 type YTMSearchResult struct {
 	VideoID  string   `json:"videoId"`
