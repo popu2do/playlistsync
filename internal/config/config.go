@@ -17,6 +17,11 @@ const (
 )
 
 var (
+	// Build-time injected metadata via -ldflags
+	Version   = "v1.0.0"
+	GitCommit = "HEAD"
+	BuildTime = ""
+
 	configMu sync.RWMutex
 	// GlobalConfig is the singleton configuration instance
 	GlobalConfig = NewDefaultConfig()

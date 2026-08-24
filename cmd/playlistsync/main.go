@@ -245,6 +245,38 @@ func normalizePlatform(input string) string {
 	return string(auth.NormalizePlatform(input))
 }
 
+type playlistSpec struct {
+	Platform string
+	Resource string
+}
+
+func parsePlaylistSpec(arg string) (playlistSpec, bool) {
+	s := strings.TrimSpace(arg)
+	if s == "" {
+		return playlistSpec{}, false
+	}
+
+	// 1. Check URL patterns
+	if strings.Contains(s, "open.spotify.com/playlist/") || strings.Contains(s, "spotify:playlist:") {
+		return playlistSpec{Platform: "spotify", Resource: s}, true
+	}
+	if strings.Contains(s, "music.youtube.com/playlist") || strings.Contains(s, "youtube.com/playlist") {
+		return playlistSpec{Platform: "youtube-music", Resource: s}, true
+	}
+
+	// 2. Check platform prefix notation (e.g. spotify:"My List", sp:37i9..., ytm:, youtube-music:PLxxx)
+	if idx := strings.Index(s, ":"); idx != -1 {
+		prefix := strings.ToLower(s[:idx])
+		val := strings.Trim(strings.TrimSpace(s[idx+1:]), "\"'")
+		norm := normalizePlatform(prefix)
+		if norm == "spotify" || norm == "youtube-music" {
+			return playlistSpec{Platform: norm, Resource: val}, true
+		}
+	}
+
+	return playlistSpec{}, false
+}
+
 func resolveArtifactPaths(name string, customOutDir ...string) (spPath, resPath, repPath string) {
 	slug := sanitizeSlug(name)
 	outDir := config.GetOutputDir()
@@ -287,23 +319,26 @@ func resolveArtifactPaths(name string, customOutDir ...string) (spPath, resPath,
 func printUsage() {
 	fmt.Println("============================================================")
 	fmt.Println("  playlistsync - Universal Playlist Synchronization CLI")
-	fmt.Println("=============================================================")
+	fmt.Println("============================================================")
 	fmt.Println("\nUsage:")
 	fmt.Println("  playlistsync <command> [arguments] [options]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  sync <playlist_name> [options]     Synchronize playlist across platforms")
-	fmt.Println("                                     Options: --from=spotify --to=youtube-music (default)")
-	fmt.Println("                                     Flags: --yes / -y, --non-interactive, --clean-extra")
+	fmt.Println("  sync [source_spec] [target_spec]   Synchronize playlist across platforms")
+	fmt.Println("                                     Supported formats: specifier (spotify:\"name\" ytm:), URL, or flags")
+	fmt.Println("                                     Flags: --from, --to, --source, --target, --sync-order, --clean-extra, --concurrency, -y, --proxy")
 	fmt.Println("                                     Supported aliases: spotify/spo/sp, youtube-music/ytmusic/youtube/ytm/yt")
 	fmt.Println("  login [platform]                   Authenticate platform credentials (spotify | youtube-music | all)")
 	fmt.Println("  inspect <playlist_name>            Display migration summary and track status (alias: status, summary)")
 	fmt.Println("  verify <playlist_name>             Run invariant integrity checks (alias: validate)")
 	fmt.Println("  report <playlist_name>             Regenerate canonical migration report")
 	fmt.Println("\nExamples:")
+	fmt.Println("  playlistsync sync spotify:\"My Playlist\" ytm:")
+	fmt.Println("  playlistsync sync ytm:\"My Playlist\" spotify:")
+	fmt.Println("  playlistsync sync https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M ytm:")
 	fmt.Println("  playlistsync sync <playlist_name> --from=spotify --to=youtube-music")
 	fmt.Println("  playlistsync sync <playlist_name> --from=youtube-music --to=spotify")
-	fmt.Println("  playlistsync sync <playlist_name> -y")
-	fmt.Println("  playlistsync login spotify")
+	fmt.Println("  playlistsync sync spotify:\"My Playlist\" ytm: -y --proxy=http://127.0.0.1:7890")
+	fmt.Println("  playlistsync login all")
 	fmt.Println("  playlistsync inspect <playlist_name>")
 	fmt.Println("  playlistsync verify <playlist_name>")
 }
@@ -334,6 +369,12 @@ Synchronize playlists between Spotify and YouTube Music.`,
 		syncProxy          string
 		syncCleanExtra     bool
 		syncSyncOrder      bool
+		syncToID           string
+		syncTargetID       string
+		syncTarget         string
+		syncFromID         string
+		syncSourceID       string
+		syncSource         string
 		syncPlaylistID     string
 		syncID             string
 		syncAutoYes        bool
@@ -343,21 +384,95 @@ Synchronize playlists between Spotify and YouTube Music.`,
 	)
 
 	syncCmd := &cobra.Command{
-		Use:   "sync [playlist_name]",
+		Use:   "sync [source_spec] [target_spec]",
 		Short: "Synchronize playlist across platforms",
 		Long: `Synchronize playlist across platforms.
+Supported formats:
+  - Specifier notation: playlistsync sync spotify:"My Playlist" ytm:
+  - URL notation:       playlistsync sync https://open.spotify.com/playlist/xxx ytm:
+  - Flag notation:      playlistsync sync "My Playlist" --from=spotify --to=youtube-music
 Supported aliases: spotify/spo/sp, youtube-music/ytmusic/youtube/ytm/yt`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			playlistName := syncName
-			if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
-				playlistName = args[0]
+			var srcSpec, dstSpec playlistSpec
+			var srcParsed, dstParsed bool
+
+			if len(args) > 0 {
+				srcSpec, srcParsed = parsePlaylistSpec(args[0])
 			}
-			if strings.TrimSpace(playlistName) == "" {
-				fmt.Fprintln(os.Stderr, "Error: missing required playlist name.")
-				fmt.Fprintln(os.Stderr, "Usage: playlistsync sync <playlist_name> [--from=spotify] [--to=youtube-music]")
+			if len(args) > 1 {
+				dstSpec, dstParsed = parsePlaylistSpec(args[1])
+			}
+
+			// Resolve source platform and resource
+			finalFrom := syncFrom
+			finalSource := syncSource
+			if finalSource == "" {
+				finalSource = syncSourceID
+			}
+			if finalSource == "" {
+				finalSource = syncFromID
+			}
+			if finalSource == "" {
+				finalSource = syncName
+			}
+
+			if srcParsed {
+				if finalFrom == "" {
+					finalFrom = srcSpec.Platform
+				}
+				if finalSource == "" {
+					finalSource = srcSpec.Resource
+				}
+			} else if len(args) > 0 && finalSource == "" {
+				finalSource = strings.TrimSpace(args[0])
+			}
+
+			// Resolve target platform and resource
+			finalTo := syncTo
+			finalTarget := syncTarget
+			if finalTarget == "" {
+				finalTarget = syncToID
+			}
+			if finalTarget == "" {
+				finalTarget = syncTargetID
+			}
+			if finalTarget == "" {
+				finalTarget = syncPlaylistID
+			}
+			if finalTarget == "" {
+				finalTarget = syncID
+			}
+
+			if dstParsed {
+				if finalTo == "" {
+					finalTo = dstSpec.Platform
+				}
+				if finalTarget == "" {
+					finalTarget = dstSpec.Resource
+				}
+			} else if len(args) > 1 && finalTarget == "" {
+				finalTarget = strings.TrimSpace(args[1])
+			}
+
+			playlistName := finalSource
+			if strings.TrimSpace(playlistName) == "" && syncJSONPath == "" {
+				fmt.Fprintln(os.Stderr, "Error: missing required playlist name or source.")
+				fmt.Fprintln(os.Stderr, "Usage examples:")
+				fmt.Fprintln(os.Stderr, "  playlistsync sync spotify:\"My Playlist\" ytm:")
+				fmt.Fprintln(os.Stderr, "  playlistsync sync \"My Playlist\" --from=spotify --to=youtube-music")
 				return errors.New("missing required playlist name")
+			}
+
+			if strings.TrimSpace(finalFrom) == "" || strings.TrimSpace(finalTo) == "" {
+				fmt.Fprintln(os.Stderr, "Error: missing required platforms --from and --to.")
+				fmt.Fprintln(os.Stderr, "Both source and destination platforms must be specified (via flags or specifier notation).")
+				fmt.Fprintln(os.Stderr, "Examples:")
+				fmt.Fprintln(os.Stderr, "  playlistsync sync spotify:\"My Playlist\" ytm:")
+				fmt.Fprintln(os.Stderr, "  playlistsync sync \"My Playlist\" --from=spotify --to=youtube-music")
+				fmt.Fprintln(os.Stderr, "  playlistsync sync \"My Playlist\" --from=youtube-music --to=spotify")
+				return errors.New("missing required --from and --to platforms")
 			}
 
 			proxyURL := syncProxy
@@ -367,8 +482,8 @@ Supported aliases: spotify/spo/sp, youtube-music/ytmusic/youtube/ytm/yt`,
 
 			autoYes := syncAutoYes || syncNonInteractive
 
-			normFrom := normalizePlatform(syncFrom)
-			normTo := normalizePlatform(syncTo)
+			normFrom := normalizePlatform(finalFrom)
+			normTo := normalizePlatform(finalTo)
 
 			var dir engine.SyncDirection
 			switch {
@@ -384,10 +499,7 @@ Supported aliases: spotify/spo/sp, youtube-music/ytmusic/youtube/ytm/yt`,
 				return fmt.Errorf("unsupported sync direction: %s -> %s", normFrom, normTo)
 			}
 
-			targetPlaylistID := syncPlaylistID
-			if targetPlaylistID == "" {
-				targetPlaylistID = syncID
-			}
+			targetPlaylistID := finalTarget
 
 			outDir := config.GetOutputDir()
 			if syncOutputDir != "" {
@@ -438,13 +550,13 @@ Supported aliases: spotify/spo/sp, youtube-music/ytmusic/youtube/ytm/yt`,
 
 			syncer, err := engine.NewSyncer(cfg)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Initialization error: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Initialization error: %s\n", auth.SanitizeSensitive(err.Error()))
 				return err
 			}
 
 			res, err := syncer.Run()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Sync execution failed: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Sync execution failed: %s\n", auth.SanitizeSensitive(err.Error()))
 				return err
 			}
 
@@ -456,13 +568,19 @@ Supported aliases: spotify/spo/sp, youtube-music/ytmusic/youtube/ytm/yt`,
 
 	syncCmd.Flags().StringVar(&syncJSONPath, "json", "", "Load Spotify playlist directly from JSON file")
 	syncCmd.Flags().StringVar(&syncName, "name", "", "Playlist name")
-	syncCmd.Flags().StringVar(&syncFrom, "from", "spotify", "Source platform: spotify | youtube-music")
-	syncCmd.Flags().StringVar(&syncTo, "to", "youtube-music", "Target platform: youtube-music | spotify")
+	syncCmd.Flags().StringVar(&syncSource, "source", "", "Source playlist name, ID, or URL")
+	syncCmd.Flags().StringVar(&syncTarget, "target", "", "Target playlist name, ID, or URL")
+	syncCmd.Flags().StringVar(&syncFrom, "from", "", "Source platform: spotify | youtube-music")
+	syncCmd.Flags().StringVar(&syncTo, "to", "", "Target platform: youtube-music | spotify")
 	syncCmd.Flags().StringVar(&syncProxy, "proxy", "", "Proxy URL (defaults to system proxy)")
 	syncCmd.Flags().BoolVar(&syncCleanExtra, "clean-extra", true, "Remove extraneous tracks in destination")
 	syncCmd.Flags().BoolVar(&syncSyncOrder, "sync-order", true, "Synchronize track sequence/order between source and target playlists")
-	syncCmd.Flags().StringVar(&syncPlaylistID, "playlist-id", "", "Destination playlist ID")
-	syncCmd.Flags().StringVar(&syncID, "id", "", "Destination playlist ID (short)")
+	syncCmd.Flags().StringVar(&syncToID, "to-id", "", "Destination playlist ID (alias for --target)")
+	syncCmd.Flags().StringVar(&syncTargetID, "target-id", "", "Destination playlist ID (alias for --target)")
+	syncCmd.Flags().StringVar(&syncFromID, "from-id", "", "Source playlist ID (alias for --source)")
+	syncCmd.Flags().StringVar(&syncSourceID, "source-id", "", "Source playlist ID (alias for --source)")
+	syncCmd.Flags().StringVar(&syncPlaylistID, "playlist-id", "", "Destination playlist ID (legacy alias for --target)")
+	syncCmd.Flags().StringVar(&syncID, "id", "", "Destination playlist ID (short legacy alias for --target)")
 	syncCmd.Flags().BoolVarP(&syncAutoYes, "yes", "y", false, "Automatic yes to prompts")
 	syncCmd.Flags().BoolVar(&syncNonInteractive, "non-interactive", false, "Run in non-interactive mode")
 	syncCmd.Flags().IntVarP(&syncConcurrency, "concurrency", "c", engine.DefaultSearchConcurrency, "Number of concurrent search workers")

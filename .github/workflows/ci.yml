@@ -1,0 +1,71 @@
+name: CI Quality Gate
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+        go: [ '1.24', '1.23' ]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: Verify Dependencies
+        run: go mod verify
+
+      - name: Run Go Vet & Static Analysis
+        run: go vet ./...
+
+      - name: Run Unit & Integration Tests with Race Detector
+        if: runner.os != 'windows'
+        run: go test -v -race -covermode=atomic ./...
+
+      - name: Run Tests on Windows
+        if: runner.os == 'windows'
+        run: go test -v ./...
+
+  build-matrix:
+    name: Build Cross-Platform Matrix
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Compile Windows amd64
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -trimpath -ldflags="-s -w" -o bin/playlistsync-windows-amd64.exe ./cmd/playlistsync
+
+      - name: Compile macOS arm64
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+        run: go build -trimpath -ldflags="-s -w" -o bin/playlistsync-darwin-arm64 ./cmd/playlistsync
+
+      - name: Compile Linux amd64
+        env:
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -trimpath -ldflags="-s -w" -o bin/playlistsync-linux-amd64 ./cmd/playlistsync

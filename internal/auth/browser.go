@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"time"
 )
 
 var (
@@ -99,14 +98,6 @@ func closeBrowserGracefully(cmd *exec.Cmd, port int) {
 	// Try sending Browser.close command to CDP target if port is provided
 	if port > 0 {
 		_ = closeCDPBrowser(port)
-	}
-
-	// Give the browser process up to 1.5 seconds to exit gracefully
-	for i := 0; i < 15; i++ {
-		if cmd.ProcessState != nil {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	killProcessTree(cmd)

@@ -327,7 +327,13 @@ func StartCDPLoginWithContext(ctx context.Context, targetURL string, savePath st
 		procExit <- cmd.Wait()
 	}()
 
-	defer closeBrowserGracefully(cmd, port)
+	defer func() {
+		closeBrowserGracefully(cmd, port)
+		select {
+		case <-procExit:
+		case <-time.After(2 * time.Second):
+		}
+	}()
 
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()

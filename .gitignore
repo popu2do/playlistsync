@@ -19,7 +19,7 @@ coverage.html
 # .gocache/ # 当你试图将工具链产物放根目录下说明你犯错了！
 vendor/
 
-# OS, Editor & Agent Metadata
+# OS, Editor 
 .DS_Store
 Thumbs.db
 Desktop.ini
@@ -28,9 +28,16 @@ Desktop.ini
 *.swp
 *.swo
 *~
+*.http
+*.rest
+
+# Agent Metadata
 .dsh*
+.cursor/
+.windsurf/
 .claude/
-.agent/
+.agents/
+AGENTS.md
 
 # All runtime credentials, inputs, and generated files live in output/ and are 100% ignored
 output/

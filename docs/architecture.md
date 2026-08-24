@@ -57,7 +57,7 @@
 
 ### 2.4 Reporting & Audit Layer (`internal/report`)
 - **Summary Visualizer (`Summarize`)**: Generates human-readable console metrics and track breakdown summaries.
-- **Invariant Verifier (`Validate`)**: Enforces 4 formal data integrity invariants across source, result, and report datasets.
+- **Invariant Verifier (`Validate`)**: Enforces 5 formal data integrity invariants across source, result, and report datasets.
 - **Artifact Generator (`GenerateReport`)**: Persists canonical JSON audit reports using atomic file operations.
 
 ### 2.5 Provider Adapters (`internal/spotify`, `internal/ytmusic`)

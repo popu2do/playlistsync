@@ -274,17 +274,29 @@ func TestRun_SyncCommand(t *testing.T) {
 			resetAuth()
 		}()
 
-		code := run([]string{"sync", "sync_cli_test"})
+		code := run([]string{"sync", "sync_cli_test", "--from=spotify", "--to=youtube-music"})
 		if code != 0 {
 			t.Errorf("expected exit code 0 for sync, got %d", code)
 		}
 
-		codeYes := run([]string{"sync", "sync_cli_test", "-y"})
+		// Test specifier notation (e.g. spotify:"sync_cli_test" ytm:)
+		codeSpec := run([]string{"sync", "spotify:sync_cli_test", "ytm:", "-y"})
+		if codeSpec != 0 {
+			t.Errorf("expected exit code 0 for sync with specifier notation, got %d", codeSpec)
+		}
+
+		// Test source/target flag notation
+		codeFlags := run([]string{"sync", "--source=sync_cli_test", "--from=spotify", "--to=youtube-music", "-y"})
+		if codeFlags != 0 {
+			t.Errorf("expected exit code 0 for sync with --source flag, got %d", codeFlags)
+		}
+
+		codeYes := run([]string{"sync", "sync_cli_test", "--from=spotify", "--to=youtube-music", "-y"})
 		if codeYes != 0 {
 			t.Errorf("expected exit code 0 for sync with trailing -y, got %d", codeYes)
 		}
 
-		codeNonInteractive := run([]string{"sync", "--non-interactive", "sync_cli_test"})
+		codeNonInteractive := run([]string{"sync", "--non-interactive", "sync_cli_test", "--from=spotify", "--to=youtube-music"})
 		if codeNonInteractive != 0 {
 			t.Errorf("expected exit code 0 for sync with --non-interactive, got %d", codeNonInteractive)
 		}

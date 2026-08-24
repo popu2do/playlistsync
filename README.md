@@ -1,141 +1,127 @@
-# playlistsync - Universal Playlist Synchronization CLI (Go)
+<div align="center">
 
-`playlistsync` is a production-grade Go CLI application designed to synchronize music playlists between streaming platforms (Spotify and YouTube Music) with conservative fuzzy matching, automated pruning of extraneous tracks, and auditable differential reporting.
+# playlistsync
 
-## Architecture
+Two-way playlist synchronization between Spotify and YouTube Music.
 
-The codebase is structured in Go following a clean layered architecture, strictly decoupling domain data models, provider adapters, synchronization engine, and CLI presentation:
+[English](README.md) | [简体中文](README_zh.md)
 
-```
-.
-├── go.mod
-├── internal/
-│   ├── auth/            # Headless & interactive CDP auth, token/cookie probes, proxy detection
-│   │   ├── auth.go      # High-level auth facades (EnsureAuthenticated, LoginPlatform)
-│   │   ├── cdp.go       # CDP WebSocket client & browser lifecycle management
-│   │   ├── storage.go   # Secure credential file I/O (0600 permissions, atomic writes)
-│   │   └── validator.go # Session validation probes & TOTP token signatures
-│   │
-│   ├── config/          # Central configuration & environment variable mappings
-│   │   └── config.go    # AppConfig, directory resolution, and defaults
-│   │
-│   ├── model/           # Canonical domain entities and data definitions
-│   │   ├── spotify.go   # SpotifyPlaylist, SpotifyTrack
-│   │   ├── ytmusic.go   # YTMPlaylist, YTMTrack, YTMSearchResult
-│   │   └── sync.go      # SyncResult, SkippedTrack, AddedTrack, RemovedTrack
-│   │
-│   ├── spotify/         # Spotify data access layer
-│   │   ├── client.go    # Spotify Web API, GraphQL, and Embed scraper
-│   │   └── reader.go    # JSON/CSV file reader and writer
-│   │
-│   ├── ytmusic/         # YouTube Music Innertube API adapter
-│   │   ├── client.go    # HTTP client with SAPISID authentication
-│   │   └── parser.go    # Innertube payload and continuation parser
-│   │
-│   ├── engine/          # Core synchronization engine
-│   │   ├── diff.go      # Diffing and confidence matching algorithms
-│   │   ├── review.go    # Interactive review prompts and decision state machine
-│   │   └── syncer.go    # End-to-end sync workflow orchestration
-│   │
-│   └── report/          # Audit and verification layer
-│       └── reporter.go  # Summary, invariant validation, and report generator
-│
-├── cmd/
-│   └── playlistsync/
-│       └── main.go      # CLI entrypoint (binary: playlistsync)
-│
-├── docs/                # Technical documentation and specifications
-│   ├── architecture.md
-│   ├── contracts.md
-│   ├── decisions.md
-│   ├── design.md
-│   ├── specification.md
-│   └── workflow.md
-│
-└── output/              # 100% ignored by Git (all runtime data, credentials & reports)
-    ├── auth/            # Platform credentials & browser profiles
-    ├── spotify_<name>_source.json                # Source playlist snapshot
-    ├── spotify_to_ytmusic_<name>_result.json     # Execution result
-    └── spotify_to_ytmusic_<name>_report.json     # Audit report
-```
+[![Version](https://img.shields.io/badge/version-v1.0.0-2ea44f?style=flat-square)](https://github.com/popu2do/playlistsync/releases)
+[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat-square&logo=go)](https://golang.org)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-555555?style=flat-square)](https://github.com/popu2do/playlistsync/releases)
+[![License](https://img.shields.io/badge/License-CC%20BY--NC--ND%204.0-lightgrey?style=flat-square)](LICENSE)
 
-## CLI Usage
+</div>
 
-### Build
+---
 
-```powershell
-go build -buildvcs=false -o bin/playlistsync.exe ./cmd/playlistsync
+## Overview
+
+`playlistsync` is a lightweight command-line tool for synchronizing playlists bidirectionally between Spotify and YouTube Music.
+
+Most commercial transfer services charge recurring monthly subscriptions or require handing over account credentials to third-party servers. `playlistsync` runs entirely on your local machine—authenticating directly through your local browser with no cloud intermediaries or data collection.
+
+To handle metadata discrepancies across platforms, it includes automated title cleaning, CJK Traditional/Simplified conversion, and multi-factor duration/artist verification to preserve original tracks and track order.
+
+---
+
+## Features
+
+- **Local Execution & Privacy**: Authenticates directly via your local browser. Credentials are saved strictly inside `output/auth/` on your own machine.
+- **Conservative Fuzzy Matching**: Strips metadata noise (`MV`, `Live`, `4K`, `Remastered`, etc.), normalizes CJK text, and enforces strict duration tolerances to avoid matching covers or fan edits.
+- **Preserves Original Order**: Retains source sequence by default and supports incremental synchronization and pruning extraneous destination tracks.
+- **Interactive Review**: Prompts in the terminal when match confidence is borderline, allowing manual confirmation or custom URL input.
+- **Self-Contained Binary**: Zero external runtime dependencies (no Python or Node.js required), with automatic system proxy detection.
+
+---
+
+## Installation
+
+Download the precompiled archive for your platform from [Releases](https://github.com/popu2do/playlistsync/releases):
+
+| Platform | Archive | Description |
+| :--- | :--- | :--- |
+| **Windows** | `playlistsync-windows-amd64.zip` | 64-bit Windows PC |
+| **macOS** | `playlistsync-darwin-arm64.tar.gz`<br>`playlistsync-darwin-amd64.tar.gz` | Apple Silicon (M-series)<br>Intel Mac |
+| **Linux** | `playlistsync-linux-amd64.tar.gz` | 64-bit Linux |
+
+---
+
+## Usage
+
+### 1. Authentication (First Run)
+
+Opens the official login page in your default browser to extract and store credentials locally:
+
+```bash
+# Authenticate platforms
+./playlistsync login [all|spotify|youtube-music]
 ```
 
-### Commands
+### 2. Synchronize Playlists
 
-#### 1. Synchronize Playlist
+```bash
+# Sync from Spotify to YouTube Music
+./playlistsync sync spotify:"Playlist Name" ytm:
 
-Synchronize a playlist between platforms:
+# Sync from YouTube Music to Spotify
+./playlistsync sync ytm:"Playlist Name" spotify:
 
-```powershell
-# Spotify to YouTube Music (Default)
-.\bin\playlistsync.exe sync <playlist_name> --from=spotify --to=youtube-music
+# Direct playlist share URL
+./playlistsync sync https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M ytm:
 
-# YouTube Music to Spotify
-.\bin\playlistsync.exe sync <playlist_name> --from=youtube-music --to=spotify
+# Specify local proxy if needed
+./playlistsync sync spotify:"Playlist Name" ytm: --proxy=http://127.0.0.1:7890
+
+# Non-interactive mode (default strategy)
+./playlistsync sync spotify:"Playlist Name" ytm: -y
 ```
 
-Options:
-- `--from=<spotify|youtube-music>`: Source platform (`spotify` or `youtube-music`; aliases `spo`, `sp`, `youtube`, `ytmusic`, `ytm`, `yt` supported).
-- `--to=<youtube-music|spotify>`: Destination platform (`youtube-music` or `spotify`).
-- `--clean-extra`: When true (default), prunes unmapped tracks in destination.
-- `--proxy`: HTTP/HTTPS proxy URL (falls back to system proxy and `HTTP_PROXY`).
-- `--yes` / `-y`: Automatically confirm prompts for non-interactive execution.
-- `--concurrency` / `-c`: Concurrent candidate search worker count (default: 6).
-- `--output-dir`: Custom working and artifact directory (default: `output/`).
-- `--json`: Direct path to source playlist JSON file.
-- `--playlist-id` / `--id`: Explicit target playlist ID.
+---
 
-#### 2. Authenticate Credentials (login)
+## Commands
 
-Authenticate Spotify and YouTube Music accounts via automated Chrome/Edge CDP login:
+| Command | Description |
+| :--- | :--- |
+| `playlistsync login [platform]` | Authenticate platform session (`spotify` / `youtube-music` / `all`) |
+| `playlistsync sync <spec_from> <spec_to>` | Synchronize playlist across platforms |
+| `playlistsync inspect <name>` | Display migration status and match breakdown |
+| `playlistsync verify <name>` | Verify data integrity and sync invariants |
+| `playlistsync report <name>` | Regenerate audit report JSON |
 
-```powershell
-# Authenticate all platforms (Spotify & YouTube Music)
-.\bin\playlistsync.exe login all
+---
 
-# Authenticate specific platform
-.\bin\playlistsync.exe login spotify
-.\bin\playlistsync.exe login youtube-music
+## FAQ
 
-# Force re-authentication bypassing cached validation
-.\bin\playlistsync.exe login spotify --force
-```
+**Q: Where are credentials stored and how do I log out?**  
+A: Session data is kept locally under `output/auth/`. To log out, delete that folder or run `playlistsync login <platform> --force`.
 
-#### 3. Inspect Status
+**Q: Connection timeout or proxy configuration?**  
+A: The CLI automatically uses system proxy settings. You can also explicitly specify a proxy via `--proxy=http://127.0.0.1:7890`.
 
-Display human-readable sync summary and metadata for a playlist:
+---
 
-```powershell
-.\bin\playlistsync.exe inspect <playlist_name>
-```
+## ☕ Support
 
-#### 4. Verify Invariants
+If this tool saved you time or a monthly subscription fee, feel free to buy me a coffee to support continued maintenance.
 
-Verify data consistency and integrity assertions:
+<div align="center">
+  <table>
+    <tr>
+      <td align="center">
+        <img src="assets/wechat-pay.png" width="180" alt="WeChat Pay" /><br />
+        <sub>WeChat Pay</sub>
+      </td>
+      <td align="center">
+        <img src="assets/ali-pay.png" width="180" alt="Alipay" /><br />
+        <sub>Alipay</sub>
+      </td>
+    </tr>
+  </table>
+</div>
 
-```powershell
-.\bin\playlistsync.exe verify <playlist_name>
-```
+---
 
-#### 5. Report Generation
+## License
 
-Regenerate canonical report artifact:
-
-```powershell
-.\bin\playlistsync.exe report <playlist_name>
-```
-
-## Testing
-
-Run unit tests across all packages:
-
-```powershell
-go test ./...
-```
+[CC BY-NC-ND 4.0](LICENSE). Free for personal use. All data stays local.

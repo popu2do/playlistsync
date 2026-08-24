@@ -24,8 +24,10 @@ playlistsync <command> [arguments] [options]
 
 | Flag / Option | Shorthand | Default Value | Applicable Subcommands | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `--from` | - | `spotify` | `sync` | Source platform (`spotify`, `youtube-music`; aliases: `spo`, `sp`, `youtube`, `ytmusic`, `ytm`, `yt`) |
-| `--to` | - | `youtube-music` | `sync` | Destination platform (`youtube-music`, `spotify`) |
+| `--from` | - | `""` | `sync` | Source platform (`spotify`, `youtube-music`; aliases: `spo`, `sp`, `youtube`, `ytmusic`, `ytm`, `yt`) |
+| `--to` | - | `""` | `sync` | Destination platform (`youtube-music`, `spotify`) |
+| `--source` | `--from-id`, `--source-id` | `""` | `sync` | Source playlist name, ID, or URL |
+| `--target` | `--to-id`, `--target-id`, `--playlist-id`, `--id` | `""` | `sync` | Destination playlist name, ID, or URL |
 | `--proxy` | - | System auto-detect | `sync`, `login` | Explicit HTTP/HTTPS proxy URL (e.g. `http://127.0.0.1:7890`) |
 | `--clean-extra` | - | `true` | `sync` | Automatically prune unmapped extraneous tracks from the destination playlist |
 | `--sync-order` | - | `true` | `sync` | Preserve and synchronize exact playlist track sequence across platforms |
@@ -34,7 +36,6 @@ playlistsync <command> [arguments] [options]
 | `--concurrency` | `-c` | `6` | `sync` | Number of concurrent worker goroutines for track search and candidate evaluation |
 | `--output-dir` | - | `output/` | `sync`, `inspect`, `verify`, `report` | Custom working and artifact storage directory |
 | `--json` | - | `""` | `sync` | Direct path to a local source playlist JSON file |
-| `--playlist-id` | `--id` | `""` | `sync` | Explicit destination playlist ID to synchronize into |
 | `--force` | - | `false` | `login` | Force interactive browser re-authentication, bypassing cached credential validation |
 
 ### 1.4 Exit Codes

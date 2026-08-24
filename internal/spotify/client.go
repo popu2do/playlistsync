@@ -202,9 +202,11 @@ func extractSpotifyPlaylistID(target string) string {
 		parts := strings.Split(id, "playlist/")
 		if len(parts) > 1 {
 			id = strings.Split(parts[1], "?")[0]
+			id = strings.Split(id, "#")[0]
 		}
 	}
 	id = strings.TrimPrefix(id, "spotify:playlist:")
+	id = strings.Trim(id, "/")
 	return strings.TrimSpace(id)
 }
 

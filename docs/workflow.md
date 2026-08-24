@@ -26,24 +26,31 @@ When triggered, an isolated browser window will open. Complete the login or QR c
 
 ## 2. Migration & Synchronization Scenarios
 
-### Scenario A: Spotify to YouTube Music (Default)
+### Scenario A: Spotify to YouTube Music
 
-Synchronize a Spotify playlist to YouTube Music by playlist name or ID:
+Synchronize a Spotify playlist to YouTube Music:
 
 ```bash
-# Sync by playlist name (will search or resolve Spotify playlist)
+# Using concise specifier syntax (recommended)
+playlistsync sync spotify:"My Favorite Songs" ytm:
+
+# Using direct Spotify playlist URL
+playlistsync sync https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M ytm:
+
+# Using standard flag syntax
 playlistsync sync "My Favorite Songs" --from=spotify --to=youtube-music
 
-# Sync from a local Spotify JSON export file directly
-playlistsync sync "My Favorite Songs" --json="output/spotify_my_playlist_source.json"
-
 # Sync into an existing YouTube Music destination playlist ID
-playlistsync sync "My Favorite Songs" --playlist-id="PLxxxxxxxxxxxxxxxxxxxx"
+playlistsync sync spotify:"My Favorite Songs" ytm:PLxxxxxxxxxxxxxxxxxxxx
 ```
 
-### Scenario B: YouTube Music to Spotify (Reverse Migration)
+### Scenario B: YouTube Music to Spotify
 
 ```bash
+# Using concise specifier syntax
+playlistsync sync ytm:"My YTM Playlist" spotify:
+
+# Using standard flag syntax
 playlistsync sync "My YTM Playlist" --from=youtube-music --to=spotify
 ```
 

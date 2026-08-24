@@ -277,10 +277,13 @@ type SyncResult struct {
     WebURL             string         `json:"webUrl,omitempty"`
     Title              string         `json:"title"`
     SourcePlaylistURL  string         `json:"sourcePlaylistUrl,omitempty"`
-    TotalSourceTracks  int            `json:"totalSourceTracks"`
-    AddedTracks        int            `json:"addedTracks"`
-    SkippedTracks      int            `json:"skippedTracks"`
-    Skipped            []SkippedTrack `json:"skipped"`
+    TotalSourceTracks    int            `json:"totalSourceTracks"`
+    AddedTracks          int            `json:"addedTracks"`
+    SkippedTracks        int            `json:"skippedTracks"`
+    SyncOrder            bool           `json:"syncOrder,omitempty"`
+    OrderConcordanceRate float64        `json:"orderConcordanceRate,omitempty"`
+    ReorderedCount       int            `json:"reorderedCount,omitempty"`
+    Skipped              []SkippedTrack `json:"skipped"`
     AddedAfterReview   []AddedTrack   `json:"addedAfterReview,omitempty"`
     RemovedExtraTracks []RemovedTrack `json:"removedExtraTracks,omitempty"`
     LastSyncedAt       string         `json:"lastSyncedAt"`
