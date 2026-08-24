@@ -116,30 +116,24 @@ func ComputeReorderPlan(current []model.YTMTrack, desiredVids []string) ([]MoveA
 	return actions, nil
 }
 
-// BuildOrderedAddQueue produces a list of destination track IDs ordered strictly by source playlist Index.
-func BuildOrderedAddQueue(sourceTracks []model.SpotifyTrack, mapping map[int]string, existingTargetIDs map[string]bool) []string {
+// BuildOrderedAddQueue produces a list of destination track IDs ordered strictly by source playlist Index
+// for missing tracks (excluding already matched source indices).
+func BuildOrderedAddQueue(sourceTracks []model.SpotifyTrack, mapping map[int]string, matchedIndices map[int]bool) []string {
 	sortedTracks := append([]model.SpotifyTrack(nil), sourceTracks...)
 	sort.Slice(sortedTracks, func(i, j int) bool {
 		return sortedTracks[i].Index < sortedTracks[j].Index
 	})
 
-	seen := make(map[string]bool)
-	for k, v := range existingTargetIDs {
-		if v {
-			seen[k] = true
-		}
-	}
-
 	var toAdd []string
 	for _, st := range sortedTracks {
+		if matchedIndices != nil && matchedIndices[st.Index] {
+			continue
+		}
 		targetID, ok := mapping[st.Index]
 		if !ok || targetID == "" {
 			continue
 		}
-		if !seen[targetID] {
-			toAdd = append(toAdd, targetID)
-			seen[targetID] = true
-		}
+		toAdd = append(toAdd, targetID)
 	}
 	return toAdd
 }

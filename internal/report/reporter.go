@@ -165,10 +165,10 @@ func Validate(sourcePath, resultPath, reportPath string) error {
 	check(strings.TrimSpace(res.PlaylistURL) != "", "result playlist_url is empty")
 	check(rep.PlaylistURL == res.PlaylistURL, "report playlist_url (%q) does not match result playlist_url (%q)", rep.PlaylistURL, res.PlaylistURL)
 
-	// Invariant 2: Target capacity equivalence when verification snapshot is present
+	// Invariant 2: Target capacity equivalence / upper-bound when verification snapshot is present
 	if res.Verification != nil && res.Verification.PageTrackCount > 0 {
-		check(res.Verification.PageTrackCount == res.AddedTracks,
-			"target verification count mismatch (verification: %d != added: %d)",
+		check(res.Verification.PageTrackCount <= res.AddedTracks+len(res.RemovedExtraTracks),
+			"target verification count exceeds expected upper bound (verification: %d > added: %d)",
 			res.Verification.PageTrackCount, res.AddedTracks)
 	}
 

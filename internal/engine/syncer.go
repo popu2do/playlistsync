@@ -285,11 +285,11 @@ func (s *Syncer) runSyncSpotifyToYouTube() (*model.SyncResult, error) {
 	reviewedAdditions = append(reviewedAdditions, reviewOutcome.ReviewedAdditions...)
 	skippedList = append(skippedList, reviewOutcome.SkippedTracks...)
 
-	currentVidSet := make(map[string]bool)
-	for _, t := range ytmPlaylist.Tracks {
-		currentVidSet[t.VideoID] = true
+	matchedIndices := make(map[int]bool)
+	for _, m := range diff.Matched {
+		matchedIndices[m.Index] = true
 	}
-	newVidsToAdd := BuildOrderedAddQueue(spPlaylist.Tracks, mapping, currentVidSet)
+	newVidsToAdd := BuildOrderedAddQueue(spPlaylist.Tracks, mapping, matchedIndices)
 
 	if len(newVidsToAdd) > 0 {
 		fmt.Printf("Adding %d missing tracks to YouTube Music playlist...\n", len(newVidsToAdd))
