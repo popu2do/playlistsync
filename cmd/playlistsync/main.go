@@ -588,6 +588,11 @@ Supported aliases: spotify/spo/sp, youtube-music/ytmusic/youtube/ytm/yt`,
 
 	rootCmd.AddCommand(syncCmd)
 
+	// 1b. web command — independent top-level cockpit server. It NEVER calls
+	// syncCmd.RunE (plan Global Constraint #1): starting the web cockpit is a
+	// separate lifecycle from running a synchronization.
+	rootCmd.AddCommand(newWebCmd())
+
 	// 2. login command
 	var (
 		loginForce bool
