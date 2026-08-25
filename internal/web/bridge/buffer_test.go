@@ -4,6 +4,7 @@ import (
 	"playlistsync/internal/web/bridge"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestRingBufferWriteReadSince(t *testing.T) {
@@ -12,6 +13,10 @@ func TestRingBufferWriteReadSince(t *testing.T) {
 		stamped := rb.Write(bridge.Event{Type: "LOG_STREAM", Data: i})
 		if stamped.ID != uint64(i) {
 			t.Fatalf("write %d stamped id = %d, want %d", i, stamped.ID, i)
+		}
+		age := time.Since(time.Unix(stamped.Timestamp, 0))
+		if stamped.Timestamp == 0 || age < 0 || age > 10*time.Second {
+			t.Fatalf("write %d timestamp = %d, not freshly stamped", i, stamped.Timestamp)
 		}
 	}
 	if got := rb.LastID(); got != 5 {
@@ -152,6 +157,9 @@ func TestRingBufferConcurrentWrites(t *testing.T) {
 		}
 		if seen[ev.ID] {
 			t.Fatalf("duplicate id %d", ev.ID)
+		}
+		if ev.Timestamp == 0 {
+			t.Fatalf("event %d missing timestamp", ev.ID)
 		}
 		seen[ev.ID] = true
 	}

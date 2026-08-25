@@ -1,12 +1,17 @@
 package bridge
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
-// Event is one entry in the SSE ring buffer.
+// Event is one entry in the SSE ring buffer. Timestamp (Unix seconds) is
+// stamped at write time and supports ordering/radar time-series rendering.
 type Event struct {
-	ID   uint64      `json:"id"`
-	Type string      `json:"type"`
-	Data interface{} `json:"data"`
+	ID        uint64      `json:"id"`
+	Type      string      `json:"type"`
+	Data      interface{} `json:"data"`
+	Timestamp int64       `json:"timestamp"`
 }
 
 // SSEEventRingBuffer is a fixed-capacity ring buffer for SSE events with
@@ -35,14 +40,16 @@ func NewSSEEventRingBuffer(capacity int) *SSEEventRingBuffer {
 	}
 }
 
-// Write stores event under the next monotonic id and returns the stamped
-// copy. Oldest events are overwritten when the buffer is full.
+// Write stores event under the next monotonic id, stamps Timestamp with the
+// current Unix second, and returns the stamped copy. Oldest events are
+// overwritten when the buffer is full.
 func (r *SSEEventRingBuffer) Write(event Event) Event {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.currentID++
 	event.ID = r.currentID
+	event.Timestamp = time.Now().Unix()
 
 	idx := (r.head + r.count) % r.capacity
 	if r.count == r.capacity {
