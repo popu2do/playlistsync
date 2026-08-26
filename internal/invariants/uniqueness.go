@@ -8,7 +8,10 @@ package invariants
 func AssertUniqueTargetIDs(targetIDs []string) (hasDuplicates bool, duplicateIDs []string) {
 	seen := make(map[string]bool, len(targetIDs))
 	dupSet := make(map[string]bool)
-	var duplicates []string
+	// plan-wc-04 (TC-E2E-04): never return a nil slice — the web JSON
+	// contract types duplicate_target_ids as an ARRAY and nil marshals to
+	// `null`, crashing frontend consumers. Empty-but-non-nil keeps `[]`.
+	duplicates := make([]string, 0)
 	for _, id := range targetIDs {
 		if id == "" {
 			continue

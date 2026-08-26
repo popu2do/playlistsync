@@ -92,6 +92,11 @@ func startCockpit(port int) (banner string, wait func() error, err error) {
 		// event bus so every SSE client observes it whether shutdown came from
 		// the watchdog, an OS signal, or the cockpit shutdown endpoint.
 		EventSink: recorder,
+		// plan-wc-04 Global Constraint #2: PLAYLISTSYNC_WEB_IDLE_TIMEOUT
+		// overrides the idle-watchdog timeout (e.g. "30s" test mode; TC-E2E-05
+		// forces a watchdog shutdown hermetically). Production stays at the
+		// 15-minute default.
+		IdleTimeout: webIdleTimeoutFromEnv(),
 	}, static.DistFS)
 	if err != nil {
 		return "", nil, err
@@ -174,6 +179,20 @@ func startCockpit(port int) (banner string, wait func() error, err error) {
 	banner = fmt.Sprintf("http://127.0.0.1:%d?token=%s", srv.ActualPort(), srv.Token())
 	_ = actualURL
 	return banner, srv.Wait, nil
+}
+
+// webIdleTimeoutFromEnv resolves the idle-watchdog timeout override from
+// PLAYLISTSYNC_WEB_IDLE_TIMEOUT (plan-wc-04 Global Constraint #2). An unset,
+// unparsable or non-positive value falls back to the server default (15
+// minutes). The env var exists so E2E/integration tests can shrink the
+// watchdog without recompiling (e.g. "30s" test mode).
+func webIdleTimeoutFromEnv() time.Duration {
+	if raw := os.Getenv("PLAYLISTSYNC_WEB_IDLE_TIMEOUT"); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			return d
+		}
+	}
+	return server.DefaultIdleTimeout
 }
 
 // hexToken returns a short random hex token for the session id (not the auth

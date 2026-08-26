@@ -3,6 +3,12 @@
 # ==============================================================================
 
 BINARY_NAME   := playlistsync
+# Windows local builds get the .exe suffix (E2E harness and CI users expect
+# bin/playlistsync.exe on win32; build-all uses explicit matrix names).
+EXE_SUFFIX    :=
+ifeq ($(OS),Windows_NT)
+EXE_SUFFIX    := .exe
+endif
 CMD_DIR       := ./cmd/playlistsync
 BUILD_DIR     := ./bin
 DIST_DIR      := ./dist
@@ -18,7 +24,7 @@ LDFLAGS       := -s -w \
 
 GO_BUILD_CMD  := go build -trimpath -ldflags="$(LDFLAGS)"
 
-.PHONY: all build build-all clean test test-race test-coverage lint vet fmt tidy run help
+.PHONY: all build web-build build-all clean test test-race test-e2e test-coverage lint vet fmt tidy run help
 
 all: fmt vet test build ## 默认目标：格式化、静态检查、测试并编译本地二进制
 
@@ -37,11 +43,20 @@ fmt: ## 格式化所有 Go 源码
 vet: ## 运行 Go 官方静态分析检查
 	go vet ./...
 
-test: ## 运行所有单元测试与集成测试
-	go test -v ./...
+lint: ## 静态检查 (go vet + staticcheck)；staticcheck 缺失时自动安装
+	go vet ./...
+	command -v staticcheck >/dev/null 2>&1 || go install honnef.co/go/tools/cmd/staticcheck@latest
+	staticcheck ./...
 
-test-race: ## 开启竞态检测运行测试
-	go test -race -v ./...
+test: ## 运行所有 Go 单元/集成测试 + 前端 Vitest
+	go test ./... -count=1
+	cd web && pnpm run test
+
+test-race: ## CI 竞态门禁：CGO_ENABLED=1 go test -race ./...
+	CGO_ENABLED=1 go test -race ./... -count=1
+
+test-e2e: build ## 构建单二进制后运行 Playwright E2E (6 条 TC)
+	cd web && pnpm exec playwright test
 
 test-coverage: ## 运行测试并生成代码覆盖率报告
 	@mkdir -p $(BUILD_DIR)
@@ -49,10 +64,14 @@ test-coverage: ## 运行测试并生成代码覆盖率报告
 	go tool cover -html=$(BUILD_DIR)/coverage.out -o $(BUILD_DIR)/coverage.html
 	@echo "Coverage report written to $(BUILD_DIR)/coverage.html"
 
-build: tidy ## 构建当前平台的本地二进制文件
+web-build: ## 构建 web SPA 到 internal/web/static/dist (embed.FS 源，必须先行)
+	cd web && pnpm run build
+
+build: web-build ## 先构建 SPA (embed.FS 源)，再构建本地二进制
+	@test -d internal/web/static/dist || (echo "ERROR: internal/web/static/dist missing — run 'make web-build' first"; exit 1)
 	@mkdir -p $(BUILD_DIR)
-	$(GO_BUILD_CMD) -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)
-	@echo "Build successful: $(BUILD_DIR)/$(BINARY_NAME)"
+	$(GO_BUILD_CMD) -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE_SUFFIX) $(CMD_DIR)
+	@echo "Build successful: $(BUILD_DIR)/$(BINARY_NAME)$(EXE_SUFFIX)"
 
 build-all: clean ## 交叉编译跨平台二进制包 (Windows, macOS, Linux)
 	@mkdir -p $(DIST_DIR)

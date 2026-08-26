@@ -19,6 +19,7 @@ import (
 	"playlistsync/internal/auth"
 	"playlistsync/internal/model"
 	"playlistsync/internal/web/handlers"
+	"playlistsync/internal/web/server"
 )
 
 // TestWebCmdHelpNoAlias verifies the web command exists and does not present
@@ -625,6 +626,67 @@ func TestPKCEStateExpiry(t *testing.T) {
 	p.mu.Unlock()
 	if stillPresent {
 		t.Error("expired state entry was not pruned")
+	}
+}
+
+// TestWebIdleTimeoutFromEnv is the plan-wc-04 GC #2 resolution logic: a
+// positive parseable PLAYLISTSYNC_WEB_IDLE_TIMEOUT is honored, while unset /
+// unparsable / non-positive values fall back to the 15-minute server default.
+func TestWebIdleTimeoutFromEnv(t *testing.T) {
+	t.Setenv("PLAYLISTSYNC_WEB_IDLE_TIMEOUT", "30s")
+	if got := webIdleTimeoutFromEnv(); got != 30*time.Second {
+		t.Errorf("30s override = %v, want 30s", got)
+	}
+
+	t.Setenv("PLAYLISTSYNC_WEB_IDLE_TIMEOUT", "1500ms")
+	if got := webIdleTimeoutFromEnv(); got != 1500*time.Millisecond {
+		t.Errorf("1500ms override = %v, want 1500ms", got)
+	}
+
+	t.Setenv("PLAYLISTSYNC_WEB_IDLE_TIMEOUT", "bogus-duration")
+	if got := webIdleTimeoutFromEnv(); got != server.DefaultIdleTimeout {
+		t.Errorf("unparsable value = %v, want default %v", got, server.DefaultIdleTimeout)
+	}
+
+	t.Setenv("PLAYLISTSYNC_WEB_IDLE_TIMEOUT", "0s")
+	if got := webIdleTimeoutFromEnv(); got != server.DefaultIdleTimeout {
+		t.Errorf("0s value = %v, want default %v", got, server.DefaultIdleTimeout)
+	}
+
+	t.Setenv("PLAYLISTSYNC_WEB_IDLE_TIMEOUT", "-5s")
+	if got := webIdleTimeoutFromEnv(); got != server.DefaultIdleTimeout {
+		t.Errorf("negative value = %v, want default %v", got, server.DefaultIdleTimeout)
+	}
+
+	t.Setenv("PLAYLISTSYNC_WEB_IDLE_TIMEOUT", "")
+	if got := webIdleTimeoutFromEnv(); got != server.DefaultIdleTimeout {
+		t.Errorf("unset value = %v, want default %v", got, server.DefaultIdleTimeout)
+	}
+}
+
+// TestWebIdleTimeoutEnvShutdown is the end-to-end watchdog wiring (plan-wc-04
+// GC #2): with PLAYLISTSYNC_WEB_IDLE_TIMEOUT=2s and no activity, the cockpit
+// must shut itself down gracefully — proving the env var reaches the watchdog
+// through server.Config.IdleTimeout (TC-E2E-05 relies on this mechanism).
+func TestWebIdleTimeoutEnvShutdown(t *testing.T) {
+	t.Setenv("PLAYLISTSYNC_WEB_IDLE_TIMEOUT", "2s")
+	banner, wait, err := startCockpit(0)
+	if err != nil {
+		t.Fatalf("startCockpit: %v", err)
+	}
+	if banner == "" {
+		t.Fatal("startCockpit returned empty banner")
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("watchdog shutdown returned error: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("idle watchdog did not shut the server down within 15s (timeout override not wired?)")
 	}
 }
 

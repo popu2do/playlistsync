@@ -106,6 +106,13 @@ func (v *Verifier) Verify(input VerifyInput) InvariantSnapshot {
 		SkippedCount: input.SkippedCount,
 		FailedCount:  input.FailedCount,
 		EvaluatedAt:  time.Now().UTC(),
+		// plan-wc-04 (TC-E2E-04): the JSON contract (web contracts.ts) types
+		// duplicate_target_ids / disordered_indices as ARRAYS. Go marshals
+		// nil slices to `null`, which crashes frontend consumers reading
+		// `.length` (InvariantMonitor radar crash found by the E2E suite).
+		// Seed non-nil so early-return paths always emit `[]`.
+		DuplicateIDs:      []string{},
+		DisorderedIndices: []int{},
 	}
 
 	// 1. Count conservation.
@@ -129,6 +136,17 @@ func (v *Verifier) Verify(input VerifyInput) InvariantSnapshot {
 		if len(snap.DisorderedIndices) > 0 {
 			return snap
 		}
+	}
+
+	// JSON-contract normalization (TC-E2E-04): the assertion helpers return
+	// nil slices for the clean case (empty source order, no duplicates), which
+	// marshal to `null` and break the documented array contract. Normalize at
+	// this single choke point so the emitted snapshot always carries `[]`.
+	if snap.DisorderedIndices == nil {
+		snap.DisorderedIndices = []int{}
+	}
+	if snap.DuplicateIDs == nil {
+		snap.DuplicateIDs = []string{}
 	}
 
 	// 4. Diff completeness.

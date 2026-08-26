@@ -64,4 +64,7 @@ temp/
 
 web/node_modules/
 web/dist/
+web/e2e/.runtime/
+web/test-results/
+web/playwright-report/
 

@@ -19,7 +19,10 @@ import "sort"
 func AssertMonotonicOrder(sourceOrder, targetOrder []string) (ratio float64, disordered []int) {
 	n := len(sourceOrder)
 	if n == 0 {
-		return 0, nil
+		// plan-wc-04 (TC-E2E-04): empty-but-non-nil slice — the web JSON
+		// contract types disordered_indices as an ARRAY; nil marshals to
+		// `null` and crashes frontend consumers reading `.length`.
+		return 0, []int{}
 	}
 
 	sourcePos := make(map[string]int, n)
@@ -55,7 +58,7 @@ func AssertMonotonicOrder(sourceOrder, targetOrder []string) (ratio float64, dis
 		}
 	}
 	if len(disorder) == 0 {
-		return 1 - float64(len(lisIdx))/float64(n), nil
+		return 1 - float64(len(lisIdx))/float64(n), []int{}
 	}
 	return 1 - float64(len(lisIdx))/float64(n), disorder
 }

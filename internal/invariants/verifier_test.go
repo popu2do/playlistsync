@@ -27,14 +27,16 @@ func TestVerifyAggregation(t *testing.T) {
 			},
 			traceOK: true,
 			want: invariants.InvariantSnapshot{
-				SourceTotal:      100,
-				SyncedCount:      80,
-				SkippedCount:     15,
-				FailedCount:      5,
-				IsCountConserved: true,
-				IsDiffComplete:   true,
-				IsZeroTraceClean: true,
-				AllPassed:        true,
+				SourceTotal:       100,
+				SyncedCount:       80,
+				SkippedCount:      15,
+				FailedCount:       5,
+				IsCountConserved:  true,
+				IsDiffComplete:    true,
+				IsZeroTraceClean:  true,
+				AllPassed:         true,
+				DuplicateIDs:      []string{},
+				DisorderedIndices: []int{},
 			},
 		},
 		{
@@ -44,7 +46,9 @@ func TestVerifyAggregation(t *testing.T) {
 			},
 			traceOK: true,
 			want: invariants.InvariantSnapshot{
-				SourceTotal: 100, SyncedCount: 79, SkippedCount: 15, FailedCount: 5,
+				SourceTotal:       100, SyncedCount: 79, SkippedCount: 15, FailedCount: 5,
+				DuplicateIDs:      []string{},
+				DisorderedIndices: []int{},
 			},
 		},
 		{
@@ -60,6 +64,7 @@ func TestVerifyAggregation(t *testing.T) {
 				IsCountConserved:      true,
 				HasDuplicateTargetIDs: true,
 				DuplicateIDs:          []string{"t1"},
+				DisorderedIndices:     []int{},
 			},
 		},
 		{
@@ -77,6 +82,7 @@ func TestVerifyAggregation(t *testing.T) {
 				IsCountConserved:  true,
 				LISDisorderRatio:  0.5,
 				DisorderedIndices: []int{0},
+				DuplicateIDs:      []string{},
 			},
 		},
 		{
@@ -90,14 +96,16 @@ func TestVerifyAggregation(t *testing.T) {
 			},
 			traceOK: true,
 			want: invariants.InvariantSnapshot{
-				SourceTotal:      5,
-				SyncedCount:      4,
-				SkippedCount:     1,
-				IsCountConserved: true,
-				LISDisorderRatio: 0.2,
-				IsDiffComplete:   true,
-				IsZeroTraceClean: true,
-				AllPassed:        true,
+				SourceTotal:       5,
+				SyncedCount:       4,
+				SkippedCount:      1,
+				IsCountConserved:  true,
+				LISDisorderRatio:  0.2,
+				IsDiffComplete:    true,
+				IsZeroTraceClean:  true,
+				AllPassed:         true,
+				DuplicateIDs:      []string{},
+				DisorderedIndices: []int{},
 			},
 		},
 		{
@@ -111,12 +119,14 @@ func TestVerifyAggregation(t *testing.T) {
 			},
 			traceOK: true,
 			want: invariants.InvariantSnapshot{
-				SourceTotal:      2,
-				SyncedCount:      2,
-				IsCountConserved: true,
-				IsDiffComplete:   true,
-				IsZeroTraceClean: true,
-				AllPassed:        true,
+				SourceTotal:       2,
+				SyncedCount:       2,
+				IsCountConserved:  true,
+				IsDiffComplete:    true,
+				IsZeroTraceClean:  true,
+				AllPassed:         true,
+				DuplicateIDs:      []string{},
+				DisorderedIndices: []int{},
 			},
 		},
 		{
@@ -130,9 +140,11 @@ func TestVerifyAggregation(t *testing.T) {
 			},
 			traceOK: true,
 			want: invariants.InvariantSnapshot{
-				SourceTotal:      1,
-				SyncedCount:      1,
-				IsCountConserved: true,
+				SourceTotal:       1,
+				SyncedCount:       1,
+				IsCountConserved:  true,
+				DuplicateIDs:      []string{},
+				DisorderedIndices: []int{},
 			},
 		},
 		{
@@ -142,9 +154,11 @@ func TestVerifyAggregation(t *testing.T) {
 			},
 			traceOK: false,
 			want: invariants.InvariantSnapshot{
-				IsCountConserved: true,
-				IsDiffComplete:   true,
-				IsZeroTraceClean: false,
+				IsCountConserved:  true,
+				IsDiffComplete:    true,
+				IsZeroTraceClean:  false,
+				DuplicateIDs:      []string{},
+				DisorderedIndices: []int{},
 			},
 		},
 	}
@@ -201,5 +215,71 @@ func TestInvariantSnapshotJSON(t *testing.T) {
 		if _, ok := got[key]; !ok {
 			t.Errorf("snapshot JSON missing key %q: %s", key, data)
 		}
+	}
+}
+
+// TestVerifySnapshotJSONArraysAlwaysEmitBrackets is the plan-wc-04 regression
+// for TC-E2E-04: the web contract (contracts.ts) types duplicate_target_ids /
+// disordered_indices as ARRAYS. Verify must emit `[]` (never `null`) for the
+// clean case and for every short-circuit path, so the frontend radar reading
+// `.length` cannot crash.
+func TestVerifySnapshotJSONArraysAlwaysEmitBrackets(t *testing.T) {
+	tests := []struct {
+		name  string
+		input invariants.VerifyInput
+	}{
+		{
+			name: "clean pass with sync order",
+			input: invariants.VerifyInput{
+				SourceTotal: 4, SyncedCount: 3, SkippedCount: 1,
+				TargetIDs: []string{}, SyncOrder: true,
+			},
+		},
+		{
+			name: "clean pass without sync order",
+			input: invariants.VerifyInput{
+				SourceTotal: 4, SyncedCount: 3, SkippedCount: 1,
+				TargetIDs: []string{}, SyncOrder: false,
+			},
+		},
+		{
+			name: "empty source order with sync order on",
+			input: invariants.VerifyInput{
+				SourceTotal: 4, SyncedCount: 4,
+				TargetIDs: []string{}, SyncOrder: true,
+			},
+		},
+		{
+			name: "count violation short-circuits",
+			input: invariants.VerifyInput{
+				SourceTotal: 4, SyncedCount: 3, SkippedCount: 2,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := invariants.NewVerifier(invariants.WithZeroTraceProbe(func() bool { return true }))
+			snap := v.Verify(tt.input)
+			data, err := json.Marshal(snap)
+			if err != nil {
+				t.Fatalf("marshal snapshot: %v", err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatalf("unmarshal snapshot: %v", err)
+			}
+			for _, key := range []string{"duplicate_target_ids", "disordered_indices"} {
+				raw, ok := got[key]
+				if !ok {
+					t.Fatalf("snapshot JSON missing key %q: %s", key, data)
+				}
+				if raw == nil {
+					t.Errorf("key %q marshalled to null — contract requires [] (TC-E2E-04): %s", key, data)
+				}
+				if _, isSlice := raw.([]any); !isSlice {
+					t.Errorf("key %q is %T, want an array: %s", key, raw, data)
+				}
+			}
+		})
 	}
 }
