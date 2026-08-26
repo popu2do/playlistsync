@@ -84,42 +84,50 @@ func inspectPlaylist(cfg HandlerConfig) http.HandlerFunc {
 	}
 }
 
-// matchStateOf resolves a source track index's match state from the last diff.
-func matchStateOf(cfg HandlerConfig, index int) string {
+// matchStateIndex pre-indexes the last diff's partitions by source track index
+// (plan QC qc3-M4): O(n) build once, O(1) lookup per track, replacing the
+// previous per-track O(m) linear scans (O(n*m) total). Partition priority
+// matches the historic first-scan order: added > retained > skipped.
+func matchStateIndex(cfg HandlerConfig) map[int]string {
+	idx := make(map[int]string)
 	if cfg.State == nil {
-		return "unknown"
+		return idx
 	}
 	_, _, diff, _ := cfg.State.Snapshot()
 	if diff == nil {
-		return "unknown"
+		return idx
+	}
+	mark := func(index int, state string) {
+		if _, ok := idx[index]; !ok {
+			idx[index] = state
+		}
 	}
 	for i := range diff.Added {
-		if diff.Added[i].Index == index {
-			return "added"
-		}
+		mark(diff.Added[i].Index, "added")
 	}
 	for i := range diff.Retained {
-		if diff.Retained[i].Index == index {
-			return "retained"
-		}
+		mark(diff.Retained[i].Index, "retained")
 	}
 	for i := range diff.Skipped {
-		if diff.Skipped[i].Index == index {
-			return "skipped"
-		}
+		mark(diff.Skipped[i].Index, "skipped")
 	}
-	return "unknown"
+	return idx
 }
 
 func sourceTrackViews(cfg HandlerConfig, pl *model.SpotifyPlaylist) []trackInspectView {
+	states := matchStateIndex(cfg)
 	out := make([]trackInspectView, 0, len(pl.Tracks))
 	for _, t := range pl.Tracks {
+		state := states[t.Index]
+		if state == "" {
+			state = "unknown"
+		}
 		out = append(out, trackInspectView{
 			Index:      t.Index,
 			Title:      t.Title,
 			Artists:    t.Artists,
 			Duration:   t.Duration,
-			MatchState: matchStateOf(cfg, t.Index),
+			MatchState: state,
 		})
 	}
 	return out

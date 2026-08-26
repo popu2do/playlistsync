@@ -52,15 +52,25 @@ func readJSON(r *http.Request, v interface{}) error {
 	return dec.Decode(v)
 }
 
+// EventStreamer is the client-facing event bus: it both broadcasts events
+// (bridge.EventBroadcaster) and supports live SSE subscription. HandlerConfig
+// is typed against this interface so the events endpoint can subscribe without
+// a concrete type assertion (plan QC qc1-M1). *RecordingBroadcaster is the
+// production implementation; tests inject any EventStreamer.
+type EventStreamer interface {
+	bridge.EventBroadcaster
+	Subscribe() (<-chan bridge.Event, func())
+}
+
 // HandlerConfig carries every seam the handlers need. cmd/playlistsync wires
 // the real implementations; tests inject fakes. All fields are optional except
 // where noted; nil/zero seams degrade to sensible HTTP errors.
 type HandlerConfig struct {
-	// Broadcaster is the event bus every handler broadcasts through. cmd/web
-	// supplies a *RecordingBroadcaster (ring + fan-out); tests may use any
-	// EventBroadcaster. Required for handlers that emit events (session
-	// shutdown, auth cdp, reconcile).
-	Broadcaster bridge.EventBroadcaster
+	// Broadcaster is the event bus every handler broadcasts through, and the
+	// SSE endpoint subscribes to. cmd/web supplies a *RecordingBroadcaster
+	// (ring + fan-out). Required for handlers that emit events (session
+	// shutdown, auth cdp, reconcile) or stream (events).
+	Broadcaster EventStreamer
 
 	// Ring is the SSE replay store. Required by the events handler.
 	Ring *bridge.SSEEventRingBuffer

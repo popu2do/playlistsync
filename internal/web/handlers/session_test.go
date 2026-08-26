@@ -168,7 +168,12 @@ func TestSessionShutdownBroadcastsAndShutsDown(t *testing.T) {
 		Broadcaster: rec,
 		Ring:        rec.Ring(),
 		State:       NewCockpitState(),
+		// The real WebServer.Shutdown broadcasts SYSTEM_SHUTDOWN through its
+		// Config.EventSink (the client bus) before draining (qc3-M2). The seam
+		// mirrors that contract so the handler test proves: POST shutdown ->
+		// server shuts down -> SYSTEM_SHUTDOWN reaches the client bus.
 		Shutdown: func(ctx context.Context) error {
+			rec.Broadcast("SYSTEM_SHUTDOWN", map[string]interface{}{"reason": "shutdown"})
 			shutdownCalled <- struct{}{}
 			return nil
 		},
@@ -181,7 +186,14 @@ func TestSessionShutdownBroadcastsAndShutsDown(t *testing.T) {
 		t.Fatalf("status = %d, want 202 (body %s)", w.Code, w.Body.String())
 	}
 
-	// SYSTEM_SHUTDOWN must be in the ring (broadcast through the recorder).
+	// SYSTEM_SHUTDOWN must reach the client bus (the server sink seam
+	// broadcast it during Shutdown).
+	select {
+	case <-shutdownCalled:
+		// graceful shutdown seam invoked.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Shutdown seam not invoked")
+	}
 	found := false
 	events, _ := rec.Ring().ReadSince(0)
 	for _, ev := range events {
@@ -190,13 +202,6 @@ func TestSessionShutdownBroadcastsAndShutsDown(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("SYSTEM_SHUTDOWN not broadcast; ring=%+v", events)
-	}
-
-	select {
-	case <-shutdownCalled:
-		// graceful shutdown seam invoked.
-	case <-time.After(2 * time.Second):
-		t.Fatal("Shutdown seam not invoked")
+		t.Errorf("SYSTEM_SHUTDOWN not broadcast to client bus; ring=%+v", events)
 	}
 }

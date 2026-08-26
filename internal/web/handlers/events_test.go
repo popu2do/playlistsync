@@ -248,3 +248,64 @@ func TestSSERootCtxCancellationReleases(t *testing.T) {
 		t.Fatal("SSE handler did not release on root context cancellation")
 	}
 }
+
+// TestSSEReconnectNoLossNoDuplicate is the qc3-M3 regression: a reconnect must
+// see every event after its Last-Event-ID exactly once. The handler subscribes
+// to the live bus BEFORE replaying ring history, so an event broadcast inside
+// that window lands both in the ring (replay) and in the subscription channel;
+// the dedup rule (ev.ID <= replayMax) must ensure it is delivered exactly once,
+// never lost, never duplicated.
+func TestSSEReconnectNoLossNoDuplicate(t *testing.T) {
+	srv, rec, _ := eventsTestServer(t, HandlerConfig{})
+	// Seed history: ids 1,2,3.
+	rec.Broadcast("E1", map[string]interface{}{"i": 1})
+	rec.Broadcast("E2", map[string]interface{}{"i": 2})
+	rec.Broadcast("E3", map[string]interface{}{"i": 3})
+
+	// Reconnect with Last-Event-ID=1 and, racing the handler's subscribe, fire
+	// E4. Whether E4 lands in the ring replay or only the live channel, the
+	// client must see it exactly once — and E2/E3 exactly once each.
+	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/events", nil)
+	req.Header.Set("Last-Event-ID", "1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	reader := newSSEReader(t, resp)
+
+	// Give the handler a moment to subscribe AND run replay (the TOCTOU
+	// window we are closing), then broadcast the racing event.
+	deadline := time.Now().Add(3 * time.Second)
+	for rec.ClientCount() != 1 && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	if rec.ClientCount() != 1 {
+		t.Fatal("SSE subscriber not registered for reconnect test")
+	}
+	rec.Broadcast("E4", map[string]interface{}{"i": 4})
+	rec.Broadcast("E5", map[string]interface{}{"i": 5})
+
+	// Consume every SSE line until E5's data arrives (then read on a bit more
+	// to catch stragglers), counting occurrences of each event type.
+	counts := map[string]int{}
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case line := <-reader.lines:
+			if strings.HasPrefix(line, "event: ") {
+				counts[strings.TrimPrefix(line, "event: ")]++
+			}
+		case <-time.After(50 * time.Millisecond):
+		}
+		if counts["E5"] >= 1 && counts["E4"] >= 1 && len(reader.lines) == 0 {
+			break
+		}
+	}
+
+	for _, typ := range []string{"E2", "E3", "E4", "E5"} {
+		if counts[typ] != 1 {
+			t.Errorf("event %s delivered %d times, want exactly 1 (zero loss / zero duplicate)", typ, counts[typ])
+		}
+	}
+}

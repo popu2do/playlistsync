@@ -42,6 +42,14 @@ type Config struct {
 	PreferredPort int           // 0 -> kernel auto-assigns; >0 -> tried, then retried within port range
 	SessionToken  string        // empty -> auto-generated 32-byte hex token
 	IdleTimeout   time.Duration // watchdog idle timeout; <=0 -> 15 minutes
+
+	// EventSink is an optional client-facing event broadcaster that receives
+	// the SYSTEM_SHUTDOWN event whenever this server shuts down — via watchdog
+	// timeout, OS signal, or the cockpit's shutdown endpoint. cmd/web wires
+	// the handlers-side RecordingBroadcaster (EventStreamer) here so SSE
+	// clients see the shutdown event on the real client bus, not just the
+	// server-internal hub (plan QC qc3-M2).
+	EventSink bridge.EventBroadcaster
 }
 
 // WebServer is the loopback-only HTTP server (spec §4.2 struct): config /
@@ -117,6 +125,7 @@ func NewWebServer(cfg Config, staticFS fs.FS) (*WebServer, error) {
 			PreferredPort: cfg.PreferredPort,
 			SessionToken:  token,
 			IdleTimeout:   idle,
+			EventSink:     cfg.EventSink,
 		},
 		token:    token,
 		hub:      NewSSEHub(),
@@ -267,10 +276,11 @@ func (s *WebServer) watchSignals() {
 	}
 }
 
-// Shutdown gracefully stops the server: broadcasts SYSTEM_SHUTDOWN, cancels
-// the root context, stops the watchdog, intercepts new writes and waits
-// (bounded by ctx) for in-flight atomic writes, then drains the HTTP server.
-// Safe for concurrent use; only the first call performs the shutdown.
+// Shutdown gracefully stops the server: broadcasts SYSTEM_SHUTDOWN (on the
+// internal hub AND Config.EventSink — the client event bus when wired),
+// cancels the root context, stops the watchdog, intercepts new writes and
+// waits (bounded by ctx) for in-flight atomic writes, then drains the HTTP
+// server. Safe for concurrent use; only the first call performs the shutdown.
 func (s *WebServer) Shutdown(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -278,6 +288,15 @@ func (s *WebServer) Shutdown(ctx context.Context) error {
 	s.once.Do(func() {
 		if s.hub != nil {
 			s.hub.Broadcast("SYSTEM_SHUTDOWN", map[string]interface{}{"reason": "shutdown"})
+		}
+		// qc3-M2: surface the shutdown event on the client-facing event bus
+		// (Config.EventSink, the handlers RecordingBroadcaster in cmd/web) so
+		// every SSE client observes SYSTEM_SHUTDOWN regardless of what
+		// triggered the shutdown (watchdog, signal, or POST /session/shutdown
+		// — the latter no longer broadcasts in the handler; the server is the
+		// single source).
+		if s.config.EventSink != nil {
+			s.config.EventSink.Broadcast("SYSTEM_SHUTDOWN", map[string]interface{}{"reason": "shutdown"})
 		}
 		if s.cancel != nil {
 			s.cancel()

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -22,12 +23,14 @@ func GenerateSessionToken() (string, error) {
 }
 
 // offlineCSP is the offline Content-Security-Policy header injected on every
-// response (spec 02 §4.2, verbatim).
-const offlineCSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self';"
+// response (spec 02 §4.2 verbatim, plus plan QC hardening: frame-ancestors
+// 'none' as the modern framing control alongside X-Frame-Options DENY).
+const offlineCSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
 
 // LoopbackAndOriginMiddleware enforces strict loopback-only Host headers (DNS
 // rebinding defense) and cross-origin blocking, and injects the offline CSP
-// header (spec 02 §4.2 verbatim, plus spec 05 §2.3 nosniff frame headers).
+// header (spec 02 §4.2 verbatim, plus spec 05 §2.3 nosniff frame headers and
+// plan QC: Referrer-Policy no-referrer + exact Origin match).
 func (s *WebServer) LoopbackAndOriginMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 校验 Host 头 (DNS rebinding defense): loopback names only.
@@ -40,24 +43,40 @@ func (s *WebServer) LoopbackAndOriginMiddleware(next http.Handler) http.Handler 
 			return
 		}
 
-		// 校验 Origin 头 (若存在): must be the loopback server itself.
+		// 校验 Origin 头 (若存在): must be the loopback server itself, with an
+		// EXACT scheme+host:port match (not a prefix match — a prefix check
+		// would accept spoofs like http://127.0.0.1:3080.evil.com).
 		origin := r.Header.Get("Origin")
 		if origin != "" {
-			expectedPrefix1 := fmt.Sprintf("http://127.0.0.1:%d", s.actualPort)
-			expectedPrefix2 := fmt.Sprintf("http://localhost:%d", s.actualPort)
-			if !strings.HasPrefix(origin, expectedPrefix1) && !strings.HasPrefix(origin, expectedPrefix2) {
+			if !originAllowed(origin, s.actualPort) {
 				http.Error(w, "Forbidden: Cross-Origin Request Blocked", http.StatusForbidden)
 				return
 			}
 		}
 
-		// 注入离线脱机 CSP + no-sniff / frame defense (spec 02 §4.2 verbatim
-		// CSP; spec 05 §2.3 adds X-Content-Type-Options / X-Frame-Options).
+		// 注入离线脱机 CSP + no-sniff / frame / referrer defense (spec 02
+		// §4.2 verbatim CSP; spec 05 §2.3 nosniff frame headers; plan QC:
+		// Referrer-Policy no-referrer).
 		w.Header().Set("Content-Security-Policy", offlineCSP)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// originAllowed reports whether an Origin header value is the loopback server
+// itself: http + exactly 127.0.0.1:<port>, localhost:<port> or [::1]:<port>.
+// An empty or malformed value is rejected (strict exact match, plan QC qc2).
+func originAllowed(origin string, port int) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "http" || u.Opaque != "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	host := fmt.Sprintf("127.0.0.1:%d", port)
+	hostLocal := fmt.Sprintf("localhost:%d", port)
+	hostV6 := fmt.Sprintf("[::1]:%d", port)
+	return u.Host == host || u.Host == hostLocal || u.Host == hostV6
 }
 
 // spotifyCallbackPath is exempted from the bearer-token gate (BLOCKER-1 fix):

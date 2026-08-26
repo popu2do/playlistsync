@@ -268,3 +268,39 @@ func TestRootDoneLiveFromConstruction(t *testing.T) {
 		t.Fatalf("Shutdown took %v — SSE client would have stalled the drain until the 5s deadline", elapsed)
 	}
 }
+
+// TestShutdownBroadcastsToEventSink is the qc3-M2 regression: when the server
+// shuts down (watchdog, signal, or the cockpit shutdown endpoint), the
+// SYSTEM_SHUTDOWN event must reach the client-facing event bus
+// (Config.EventSink, wired to the handlers RecordingBroadcaster in cmd/web) —
+// not just the server-internal hub — so every SSE client observes it.
+func TestShutdownBroadcastsToEventSink(t *testing.T) {
+	staticFS := testStaticFS()
+	// Use the server's own SSEHub as a stand-in EventSink (it implements
+	// bridge.EventBroadcaster); production wires the handlers-side bus.
+	sink := NewSSEHub()
+	srv, err := NewWebServer(Config{PreferredHost: "127.0.0.1", EventSink: sink}, staticFS)
+	if err != nil {
+		t.Fatalf("NewWebServer: %v", err)
+	}
+	ch, unsubscribe := sink.Subscribe()
+	defer unsubscribe()
+
+	if _, err := srv.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.Type != "SYSTEM_SHUTDOWN" {
+			t.Errorf("event sink got type %q, want SYSTEM_SHUTDOWN", ev.Type)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("SYSTEM_SHUTDOWN not delivered to the client event sink")
+	}
+}

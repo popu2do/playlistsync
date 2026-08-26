@@ -88,6 +88,10 @@ func startCockpit(port int) (banner string, wait func() error, err error) {
 	srv, err := server.NewWebServer(server.Config{
 		PreferredHost: "127.0.0.1",
 		PreferredPort: port,
+		// qc3-M2: route the server's SYSTEM_SHUTDOWN broadcast to the client
+		// event bus so every SSE client observes it whether shutdown came from
+		// the watchdog, an OS signal, or the cockpit shutdown endpoint.
+		EventSink: recorder,
 	}, static.DistFS)
 	if err != nil {
 		return "", nil, err
@@ -139,7 +143,10 @@ func startCockpit(port int) (banner string, wait func() error, err error) {
 		},
 		ResolveArbitration: arb.ResolveArbitration,
 		ApplyDiff: func(ctx context.Context, diff *handlers.DiffResult, force bool) (*model.SyncResult, error) {
-			return applyDiff(ctx, diff, outDir)
+			// qc3-M1: the apply write is guarded by the server's atomic-write
+			// drain (TrackWrite) so a concurrent shutdown waits for it instead
+			// of cutting the file write mid-flight.
+			return applyDiff(ctx, diff, outDir, srv.TrackWrite)
 		},
 
 		InspectSource: func(id string) (*model.SpotifyPlaylist, error) {
@@ -213,9 +220,18 @@ func runReconcile(ctx context.Context, p handlers.ReconcileParams, emit func(str
 // applyDiff writes a SyncResult artifact derived from the diff to the output
 // directory (atomic zero-trace write). It is the cockpit's apply seam; a
 // future plan can extend it to perform live YTM mutations.
-func applyDiff(ctx context.Context, diff *handlers.DiffResult, outDir string) (*model.SyncResult, error) {
+//
+// trackWrite mirrors WebServer.TrackWrite: it registers the write with the
+// server's shutdown drain (qc3-M1). When nil, the write proceeds unguarded
+// (tests).
+func applyDiff(ctx context.Context, diff *handlers.DiffResult, outDir string, trackWrite func() (func(), bool)) (*model.SyncResult, error) {
 	if diff == nil {
 		return nil, errors.New("nil diff")
+	}
+	if trackWrite != nil {
+		if done, ok := trackWrite(); ok {
+			defer done()
+		}
 	}
 	added, _, retained, skipped := diff.Counts()
 	res := &model.SyncResult{

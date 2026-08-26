@@ -126,9 +126,24 @@ func (h *eventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Last-Event-ID replay (spec 02 §3.2 / spec 05 §4.1).
 	lastID := parseLastEventID(r.Header.Get("Last-Event-ID"))
-	subscribed := false
 
-	// Ring may be absent in exotic configs; then only live events flow.
+	// Subscribe FIRST so the live bus starts buffering from this instant
+	// (qc3-M3 TOCTOU fix): any broadcast that lands while we hold on to the
+	// ring for replay is captured in the subscription channel and deduplicated
+	// against the replayed range below — zero event loss across a reconnect.
+	streamer := h.cfg.Broadcaster
+	ch := (<-chan bridge.Event)(nil)
+	if streamer != nil {
+		sub, unsub := streamer.Subscribe()
+		ch = sub
+		// defer unsubscribe() is the leak-free guarantee: whether the loop
+		// exits via client disconnect, server shutdown, or a write failure,
+		// the subscriber is removed (Task-1 review INFO-3).
+		defer unsub()
+	}
+
+	// Replay ring history (only events strictly after lastID).
+	replayMax := lastID // highest id already sent to this client
 	if ring != nil {
 		events, gap := ring.ReadSince(lastID)
 		if gap {
@@ -144,42 +159,46 @@ func (h *eventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			for i := range events {
 				writeSSEEvent(w, flusher, events[i])
 			}
-		}
-	}
-
-	// Subscribe to the live bus. defer unsubscribe() is the leak-free
-	// guarantee: whether the loop exits via client disconnect, server
-	// shutdown, or a write failure, the subscriber is removed.
-	if b, ok := h.cfg.Broadcaster.(*RecordingBroadcaster); ok {
-		ch, unsub := b.Subscribe()
-		subscribed = true
-		defer unsub()
-
-		heartbeat := h.cfg.HeartbeatInterval
-		if heartbeat <= 0 {
-			heartbeat = 30 * time.Second // spec 02 §3.4
-		}
-		ticker := time.NewTicker(heartbeat)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case ev := <-ch:
-				writeSSEEvent(w, flusher, ev)
-			case <-ticker.C:
-				writeSSEComment(w, flusher)
-			case <-r.Context().Done():
-				return
-			case <-rootDone:
-				return
+			if n := len(events); n > 0 {
+				replayMax = events[n-1].ID
 			}
 		}
 	}
-	// If the broadcaster is not a *RecordingBroadcaster (nil or a plain
-	// EventBroadcaster without subscription support), the connection just
-	// serves the replay and then holds open until the client disconnects.
-	if !subscribed {
+
+	// No streamer (nil config): serve replay, then hold open until the client
+	// disconnects.
+	if ch == nil {
 		<-r.Context().Done()
+		return
+	}
+
+	heartbeat := h.cfg.HeartbeatInterval
+	if heartbeat <= 0 {
+		heartbeat = 30 * time.Second // spec 02 §3.4
+	}
+	ticker := time.NewTicker(heartbeat)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case ev := <-ch:
+			// Drop events already delivered by the replay (or below the
+			// client's acknowledged id): the ring is written before fan-out,
+			// so anything at or below replayMax was either replayed just now
+			// or predates the client's cursor. Streaming only ev.ID > replayMax
+			// guarantees exactly-once delivery across the subscribe/replay
+			// boundary (qc3-M3).
+			if ev.ID <= replayMax {
+				continue
+			}
+			writeSSEEvent(w, flusher, ev)
+		case <-ticker.C:
+			writeSSEComment(w, flusher)
+		case <-r.Context().Done():
+			return
+		case <-rootDone:
+			return
+		}
 	}
 }
 

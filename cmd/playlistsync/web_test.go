@@ -316,7 +316,7 @@ func TestApplyDiffNoPendingIds(t *testing.T) {
 		Skipped: []model.SkippedTrack{{Index: 4, Title: "D"}},
 	}
 	outDir := t.TempDir()
-	res, err := applyDiff(context.Background(), diff, outDir)
+	res, err := applyDiff(context.Background(), diff, outDir, nil)
 	if err != nil {
 		t.Fatalf("applyDiff: %v", err)
 	}
@@ -341,6 +341,48 @@ func TestApplyDiffNoPendingIds(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "spotify_to_ytmusic_web_cockpit_result.json")); err != nil {
 		t.Fatalf("expected artifact path missing: %v", err)
+	}
+}
+
+// TestApplyDiffTrackWriteGuard is the qc3-M1 regression: the apply write must
+// register with the server's atomic-write drain (TrackWrite) so a concurrent
+// shutdown waits for the in-flight file write instead of cutting it off. The
+// guard's done function must be invoked exactly once after the write.
+func TestApplyDiffTrackWriteGuard(t *testing.T) {
+	diff := &handlers.DiffResult{
+		SourceTotal: 1,
+		Added:       []model.SpotifyTrack{{Index: 1, ID: "sp1", Title: "A"}},
+	}
+	outDir := t.TempDir()
+
+	doneCalled := 0
+	okResult := true
+	trackWrite := func() (func(), bool) {
+		if !okResult {
+			return nil, false
+		}
+		return func() { doneCalled++ }, true
+	}
+
+	res, err := applyDiff(context.Background(), diff, outDir, trackWrite)
+	if err != nil {
+		t.Fatalf("applyDiff: %v", err)
+	}
+	if res == nil {
+		t.Fatal("applyDiff returned nil result")
+	}
+	if doneCalled != 1 {
+		t.Errorf("trackWrite done invoked %d times, want 1 (registered + released)", doneCalled)
+	}
+
+	// Shutting-down interception (ok=false) must not deadlock or panic:
+	// the write proceeds unguarded (the request is vanishing anyway).
+	res, err = applyDiff(context.Background(), diff, outDir, trackWrite)
+	if err != nil {
+		t.Fatalf("applyDiff with rejecting guard: %v", err)
+	}
+	if res == nil {
+		t.Fatal("applyDiff with rejecting guard returned nil result")
 	}
 }
 

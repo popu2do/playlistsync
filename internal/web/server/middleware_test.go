@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -112,6 +113,14 @@ func TestLoopbackAndOriginMiddlewareOrigin(t *testing.T) {
 		{name: "cross-origin https", origin: "https://evil.example.com", want: http.StatusForbidden},
 		{name: "cross-origin different port", origin: "http://127.0.0.1:9999", want: http.StatusForbidden},
 		{name: "cross-origin scheme", origin: "https://127.0.0.1:3080", want: http.StatusForbidden},
+		// qc2 hardening: the check is an exact scheme+host:port match — a
+		// prefix-spoof origin that begins with the loopback address but is a
+		// different host must be blocked.
+		{name: "prefix spoof dotted host", origin: "http://127.0.0.1:3080.evil.com", want: http.StatusForbidden},
+		{name: "prefix spoof adjacent", origin: "http://127.0.0.1:3080evil.com", want: http.StatusForbidden},
+		{name: "origin with path rejected", origin: "http://127.0.0.1:3080/path", want: http.StatusForbidden},
+		{name: "origin with query rejected", origin: "http://127.0.0.1:3080?q=1", want: http.StatusForbidden},
+		{name: "malformed origin", origin: "not-a-url", want: http.StatusForbidden},
 	}
 
 	for _, tt := range tests {
@@ -145,6 +154,13 @@ func TestLoopbackAndOriginMiddlewareSecurityHeaders(t *testing.T) {
 	}
 	if got := rec.Header().Get("X-Frame-Options"); got != "DENY" {
 		t.Errorf("X-Frame-Options = %q, want DENY", got)
+	}
+	// qc2 hardening: referrer privacy + frame-ancestors inside the CSP.
+	if got := rec.Header().Get("Referrer-Policy"); got != "no-referrer" {
+		t.Errorf("Referrer-Policy = %q, want no-referrer", got)
+	}
+	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "frame-ancestors 'none'") {
+		t.Errorf("CSP missing frame-ancestors 'none': %q", got)
 	}
 }
 

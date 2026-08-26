@@ -107,15 +107,13 @@ func sessionHeartbeat(cfg HandlerConfig) http.HandlerFunc {
 
 func sessionShutdown(cfg HandlerConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Broadcast SYSTEM_SHUTDOWN so SSE clients can show a shutdown overlay
-		// (spec 02 §2.1 + §3.1 event #6), then trigger graceful shutdown —
-		// broadcast, root-cancel, drain HTTP (spec 02 §3.3 semantics: not
-		// os.Exit). The response is flushed before shutdown begins.
-		if cfg.Broadcaster != nil {
-			cfg.Broadcaster.Broadcast("SYSTEM_SHUTDOWN", map[string]interface{}{
-				"reason": "user_requested",
-			})
-		}
+		// Accept the request, then trigger graceful shutdown. The
+		// SYSTEM_SHUTDOWN broadcast to SSE clients is the WebServer's
+		// responsibility (server.Config.EventSink — wired to the client bus in
+		// cmd/web): the server broadcasts through it in its Shutdown path for
+		// ALL shutdown origins (watchdog, OS signal, this endpoint), so the
+		// event reaches every client exactly once (qc3-M2). The response is
+		// flushed before shutdown begins (spec 02 §2.1 + §3.1 event #6).
 		writeJSON(w, http.StatusAccepted, map[string]string{"status": "SHUTTING_DOWN"})
 
 		if cfg.Shutdown == nil {
