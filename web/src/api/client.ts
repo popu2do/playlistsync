@@ -39,12 +39,38 @@ export class ApiError extends Error {
   }
 }
 
-/** Extracts the session token from the current URL ?token= (or null). */
+/** sessionStorage key holding the boot token for refresh continuity. */
+const TOKEN_STORAGE_KEY = 'playlistsync_session_token';
+
+/**
+ * Extracts the session token from the current URL ?token= (or null).
+ *
+ * Refresh continuity (QC MAJOR-2): once a banner URL token is consumed it is
+ * mirrored into sessionStorage (tab-scoped, cleared when the tab closes). A
+ * page refresh keeps the cockpit authenticated even though the query param
+ * was already stripped — without promoting the token to long-lived storage.
+ */
 export function readTokenFromURL(): SessionToken | null {
   const raw = new URLSearchParams(window.location.search).get('token');
-  if (raw === null) return null;
+  if (raw !== null) {
+    try {
+      const token = parseSessionToken(raw);
+      // Mirror for refresh continuity; sessionStorage is per-tab ephemeral.
+      try {
+        window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+      } catch {
+        // Storage unavailable (private mode): token stays in memory only.
+      }
+      return token;
+    } catch {
+      return null;
+    }
+  }
+  // Fall back to the mirrored token (refresh after strip).
   try {
-    return parseSessionToken(raw);
+    const stored = window.sessionStorage.getItem(TOKEN_STORAGE_KEY);
+    if (stored === null) return null;
+    return parseSessionToken(stored);
   } catch {
     return null;
   }
@@ -196,29 +222,71 @@ export interface ConnectSSEOptions {
 }
 
 /**
+ * The authoritative SSE event names written by the Go backend
+ * (grep 'Broadcast("' internal/ ⇒ DIFF_PROGRESS | DIFF_COMPLETE |
+ * RECONCILE_FAILED | ARBITRATION_REQUIRED | INVARIANT_SNAPSHOT |
+ * LOG_STREAM | GAP_FALLBACK | SYSTEM_SHUTDOWN). The backend frames every
+ * event as `event: <TYPE>` (events.go writeSSEEvent), so the browser
+ * EventSource REQUIRES addEventListener('<TYPE>', ...) — onmessage only
+ * fires for unnamed frames. Must stay in sync with CockpitSSEEvent in
+ * types/contracts.ts (compile-time: the union's literal types).
+ */
+export const SSE_EVENT_TYPES = [
+  'DIFF_PROGRESS',
+  'DIFF_COMPLETE',
+  'RECONCILE_FAILED',
+  'ARBITRATION_REQUIRED',
+  'INVARIANT_SNAPSHOT',
+  'LOG_STREAM',
+  'GAP_FALLBACK',
+  'SYSTEM_SHUTDOWN',
+] as const satisfies readonly CockpitSSEEvent['type'][];
+
+/** Parses an SSE data payload (JSON string) into unknown. */
+function parseSSEData(rawData: string): unknown {
+  try {
+    return parseJson<unknown>(JSON.parse(rawData));
+  } catch {
+    // Non-JSON payload (defensive): pass the raw string through.
+    return { raw: rawData };
+  }
+}
+
+/**
  * Opens the SSE stream at /api/v1/events?token=... and dispatches parsed
  * events to onEvent. The native EventSource retries automatically and sends
  * the `Last-Event-ID` header on reconnect, which the ring buffer uses for
  * lossless replay (spec 02 §3.2). Returns a handle with close().
+ *
+ * Named-event wiring (spec 02 §3.1): the backend writes `event: <TYPE>`
+ * frames, so each known type gets its own addEventListener handler here;
+ * `onmessage` remains only as a defensive fallback for unnamed frames. A
+ * GAP_FALLBACK event additionally fires onGapFallback() so the caller can
+ * resync via GET /api/v1/reconcile/diff (spec 02 §3.2).
  */
 export function connectSSE({ client, onEvent, onGapFallback }: ConnectSSEOptions): SSEConnection {
   let closed = false;
   const es = new EventSource(client.withToken('/api/v1/events'));
 
-  es.onmessage = (msg: MessageEvent<string>) => {
-    let data: unknown;
-    try {
-      data = parseJson<unknown>(JSON.parse(msg.data));
-    } catch {
-      data = { raw: msg.data };
-    }
-    // `lastEventId` on the message carries the server id: line.
-    const id = Number(msg.lastEventId) || 0;
-    const event: CockpitSSEEvent = parseJson<CockpitSSEEvent>({ type: msg.type || 'message', data, id });
+  const dispatch = (type: string, rawData: string, id: number): void => {
+    const data = parseSSEData(rawData);
+    const event = parseJson<CockpitSSEEvent>({ type, data, id });
     if (event.type === 'GAP_FALLBACK' && onGapFallback) {
       onGapFallback();
     }
     onEvent(event);
+  };
+
+  for (const type of SSE_EVENT_TYPES) {
+    es.addEventListener(type, (e: MessageEvent<string>) => {
+      dispatch(type, e.data, Number(e.lastEventId) || 0);
+    });
+  }
+
+  // Defensive fallback: an unnamed `data:` frame resolves to the default
+  // "message" event in the DOM, which onmessage receives.
+  es.onmessage = (msg: MessageEvent<string>) => {
+    dispatch(msg.type || 'message', msg.data, Number(msg.lastEventId) || 0);
   };
 
   es.onerror = () => {

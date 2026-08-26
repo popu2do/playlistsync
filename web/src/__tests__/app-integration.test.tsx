@@ -170,6 +170,17 @@ describe('App SSE -> FSM dispatch wiring', () => {
     expect(screen.getByText(/Invariants PASSED/)).toBeInTheDocument();
   });
 
+  it('DIFF_COMPLETE triggers verifyInvariants and unlocks Apply with truthful allPassed (QC BLOCKER-2)', async () => {
+    await bootAndStartScan('src-dc', 'dst-dc');
+    // Backend does NOT emit INVARIANT_SNAPSHOT after a diff scan; it emits
+    // DIFF_COMPLETE. The App must call GET /verify/invariants itself and
+    // dispatch SCAN_COMPLETE with the REAL verdict (mock returns all_passed:
+    // true), so the Apply button unlocks instead of being locked forever.
+    await fireSSE({ type: 'DIFF_COMPLETE', id: 5, data: { status: 'complete', added: 2, removed: 1, retained: 10, skipped: 0 } });
+    await waitFor(() => expect(bannerStatus()).toBe('INVARIANT_HEALTH_CHECK'));
+    expect(screen.getByTestId('apply-button')).toBeEnabled();
+  });
+
   it('INVARIANT_SNAPSHOT broadcast during APPLYING_MUTATIONS does not throw (reconcile.go preflight)', async () => {
     await bootAndStartScan('src-2', 'dst-2');
     await fireSSE(snapshotEvent(true, 't0'));
@@ -227,6 +238,21 @@ describe('App SSE -> FSM dispatch wiring', () => {
     await fireSSE({ type: 'RECONCILE_FAILED', id: 3, data: { error: 'boom' } });
     await waitFor(() => expect(bannerStatus()).toBe('CRITICAL_ERROR'));
     expect(screen.getByText(/ERROR RECONCILE_FAILED/)).toBeInTheDocument();
+  });
+
+  it('New Sync / Reset returns CRITICAL_ERROR to CONFIGURING without reload (QC MAJOR-2)', async () => {
+    render(<App />);
+    await waitFor(() => expect(bannerStatus()).toBe('CONFIGURING'));
+    await fireSSE({ type: 'RECONCILE_FAILED', id: 3, data: { error: 'boom' } });
+    await waitFor(() => expect(bannerStatus()).toBe('CRITICAL_ERROR'));
+    const resetBtn = screen.getByTestId('reset-button');
+    expect(resetBtn).toBeInTheDocument();
+    fireEvent.click(resetBtn);
+    await waitFor(() => expect(bannerStatus()).toBe('CONFIGURING'));
+    // The error banner is cleared by the reset.
+    expect(screen.queryByText(/ERROR RECONCILE_FAILED/)).not.toBeInTheDocument();
+    // And a fresh run can start again (Start Reconcile input visible).
+    expect(screen.getByPlaceholderText('Spotify playlist URL or ID, or drop playlist JSON')).toBeInTheDocument();
   });
 });
 

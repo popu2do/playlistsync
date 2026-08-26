@@ -15,6 +15,9 @@ export interface ReconciliationCockpitProps {
   readonly onStart: (source: string, target: string, cleanExtra: boolean, syncOrder: boolean, concurrency: number) => Promise<void>;
   readonly onApply: (forceOverride: boolean) => Promise<void>;
   readonly busy: 'scanning' | 'applying' | null;
+  /** Monotonic counter bumped on every scan start (App); used to reset the
+   * Clean-Extra unlock so each new scan requires the confirmation again. */
+  readonly scanEpoch: number;
   readonly canApply: boolean;
 }
 
@@ -24,6 +27,7 @@ export function ReconciliationCockpit({
   onStart,
   onApply,
   busy,
+  scanEpoch,
   canApply,
 }: ReconciliationCockpitProps) {
   void client;
@@ -36,10 +40,13 @@ export function ReconciliationCockpit({
   const [confirmCleanOpen, setConfirmCleanOpen] = useState(false);
   const [cleanUnlocked, setCleanUnlocked] = useState(false);
 
-  // When a diff arrives, reset the dangerous-unlock state.
+  // Every new scan (epoch bump), new diff job, or terminal/failed diff state
+  // resets the destructive unlock: the user must re-confirm before any
+  // subsequent Clean-Extra run (QC MAJOR-1).
   useEffect(() => {
     setCleanUnlocked(false);
-  }, [diff?.job_id]);
+    setConfirmCleanOpen(false);
+  }, [scanEpoch, diff?.job_id, diff?.status]);
 
   const counts = diff?.counts ?? { added: 0, removed: 0, retained: 0, skipped: 0, arbitration_required: 0 };
   const total = counts.added + counts.removed + counts.retained + counts.skipped;

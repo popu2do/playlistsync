@@ -103,6 +103,24 @@ describe('FSM legal transitions (spec 04 §2 table)', () => {
       expect(next.writtenCount).toBe(3);
     }
   });
+
+  it('SNAPSHOT_REFRESH re-evaluates allPassed in INVARIANT_HEALTH_CHECK (Apply unlock)', () => {
+    const next = transitionFSM(state('INVARIANT_HEALTH_CHECK'), { type: 'SNAPSHOT_REFRESH', allPassed: true, violations: [] });
+    expect(next.status).toBe('INVARIANT_HEALTH_CHECK');
+    if (next.status === 'INVARIANT_HEALTH_CHECK') {
+      expect(next.allPassed).toBe(true);
+      expect(next.violations).toEqual([]);
+    }
+  });
+
+  it('START_SCAN carries source/target through SCANNING_DIFF for post-scan verification', () => {
+    const src = transitionFSM({ status: 'CONFIGURING', source: 'sp', target: 'yt' }, { type: 'START_SCAN', source: 'sp', target: 'yt' });
+    expect(src.status).toBe('SCANNING_DIFF');
+    if (src.status === 'SCANNING_DIFF') {
+      expect(src.source).toBe('sp');
+      expect(src.target).toBe('yt');
+    }
+  });
 });
 
 describe('FSM illegal transitions throw', () => {
@@ -126,6 +144,7 @@ describe('FSM illegal transitions throw', () => {
     ...illegalFrom({ type: 'DIFF_PROGRESS', progress: 1, currentTrack: 't' }, ['SCANNING_DIFF']),
     ...illegalFrom({ type: 'ARBITRATION_RESOLVED', progress: 1, currentTrack: 't' }, ['AWAITING_ARBITRATION']),
     ...illegalFrom({ type: 'INVARIANTS_PASSED', totalToWrite: 1 }, ['INVARIANT_HEALTH_CHECK']),
+    ...illegalFrom({ type: 'SNAPSHOT_REFRESH', allPassed: true, violations: [] }, ['INVARIANT_HEALTH_CHECK']),
     ...illegalFrom({ type: 'APPLY_PROGRESS', writtenCount: 1, totalToWrite: 2 }, ['APPLYING_MUTATIONS']),
     ...illegalFrom({ type: 'AUTH_CHECKED', missing: [] }, ['IDLE', 'AUTH_REQUIRED']),
     ...illegalFrom({ type: 'READY' }, ['IDLE', 'AUTH_REQUIRED']),

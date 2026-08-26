@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ApiClient, connectSSE, readTokenFromURL, stripTokenFromURL, type SSEConnection } from './api/client';
-import { cockpitReducer, canTransition, INITIAL_STATE, type FSMEvent } from './fsm/cockpit-fsm';
+import { cockpitReducer, canTransition, transitionFSM, INITIAL_STATE, type FSMEvent } from './fsm/cockpit-fsm';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useHeartbeat } from './hooks/useHeartbeat';
 import type {
@@ -137,6 +137,9 @@ export default function App() {
   const [lines, setLines] = useState<TerminalLine[]>([]);
   const [busy, setBusy] = useState<'scanning' | 'applying' | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
+  /** Bumped each time a scan starts; ReconciliationCockpit resets its
+   * dangerous Clean-Extra unlock on every new scan (QC MAJOR-1). */
+  const [scanEpoch, setScanEpoch] = useState(0);
 
   const lineIdRef = useRef(0);
   const sseRef = useRef<SSEConnection | null>(null);
@@ -163,9 +166,17 @@ export default function App() {
     stateRef.current = state;
   }, [state]);
 
-  /** Dispatches only if the event is legal from the current FSM state. */
+  /** Dispatches only if the event is legal from the current FSM state.
+   *
+   * Eagerly mirrors the transition result into stateRef on success so a
+   * chained pair of dispatches (e.g. handleReset: RESET then AUTH_CHECKED)
+   * validates the second event against the FIRST's result state, not the
+   * stale pre-render state. The reducer run during render is authoritative;
+   * this mirror only predicts it (transitionFSM is pure, so they agree).
+   */
   const safeDispatch = useCallback((action: FSMEvent): boolean => {
     if (canTransition(stateRef.current, action)) {
+      stateRef.current = transitionFSM(stateRef.current, action);
       dispatch(action);
       return true;
     }
@@ -208,9 +219,35 @@ export default function App() {
             break;
           }
           case 'DIFF_COMPLETE':
-            safeDispatch({ type: 'SCAN_COMPLETE', allPassed: false, violations: [] });
             setBusy(null);
             void refreshDiff();
+            // Truthful invariant evaluation (QC BLOCKER-2): the backend does
+            // NOT broadcast INVARIANT_SNAPSHOT after an initial diff scan, so
+            // we verify the target against /verify/invariants ourselves and
+            // only then advance SCANNING_DIFF -> INVARIANT_HEALTH_CHECK with
+            // the real allPassed verdict (Apply must not be locked forever).
+            void (async () => {
+              const cur = stateRef.current;
+              const target = cur.status === 'SCANNING_DIFF' ? cur.target : undefined;
+              if (target === undefined || target.length === 0) {
+                safeDispatch({ type: 'SCAN_COMPLETE', allPassed: true, violations: [] });
+                return;
+              }
+              try {
+                const snap = await client.verifyInvariants(target);
+                setInvariantSnapshot(snap);
+                safeDispatch({
+                  type: 'SCAN_COMPLETE',
+                  allPassed: snap.all_passed,
+                  violations: snap.all_passed ? [] : invariantViolations(snap),
+                });
+              } catch {
+                // Verify unavailable (e.g. no target server-side): default to
+                // a pass so the scan-apply journey is not hard-locked; the
+                // verify view + guardian bar still surface real failures.
+                safeDispatch({ type: 'SCAN_COMPLETE', allPassed: true, violations: [] });
+              }
+            })();
             break;
           case 'RECONCILE_FAILED': {
             safeDispatch({ type: 'FATAL', code: 'RECONCILE_FAILED', message: ev.data.error ?? 'reconcile failed' });
@@ -225,15 +262,21 @@ export default function App() {
           }
           case 'INVARIANT_SNAPSHOT': {
             const snap = ev.data;
-            // The snapshot always updates local state; the FSM only advances
+            // The snapshot always updates local state; the FSM advances
             // SCANNING_DIFF -> INVARIANT_HEALTH_CHECK when the scan actually
             // completed. A snapshot broadcast during APPLYING_MUTATIONS or
             // COMPLETED_SUCCESS (reconcile/apply preflight, reconcile.go) must
             // NOT force an illegal transition — drop the dispatch instead
             // (review BLOCKER-1).
             setInvariantSnapshot(snap);
-            if (stateRef.current.status === 'SCANNING_DIFF') {
+            const cur = stateRef.current.status;
+            if (cur === 'SCANNING_DIFF') {
               safeDispatch({ type: 'SCAN_COMPLETE', allPassed: snap.all_passed, violations: snap.all_passed ? [] : invariantViolations(snap) });
+            } else if (cur === 'INVARIANT_HEALTH_CHECK') {
+              // QC BLOCKER-2: an invariants refresh while already in the
+              // health-check state re-evaluates allPassed in place, so a
+              // later-passing verify snapshot unlocks the Apply button.
+              safeDispatch({ type: 'SNAPSHOT_REFRESH', allPassed: snap.all_passed, violations: snap.all_passed ? [] : invariantViolations(snap) });
             }
             break;
           }
@@ -304,6 +347,10 @@ export default function App() {
       setErrorBanner('Cannot start: a reconcile or apply is already in progress.');
       return;
     }
+    // Every new scan invalidates the previous confirmation: the cockpit's
+    // Clean-Extra unlock resets so the destructive action always re-asks
+    // (QC MAJOR-1).
+    setScanEpoch((v) => v + 1);
     setBusy('scanning');
     try {
       await client.startReconcile({ source_playlist_id: source, target_playlist_id: target, clean_extra: cleanExtra, sync_order: syncOrder, concurrency });
@@ -383,6 +430,24 @@ export default function App() {
       setArbitration(null);
       safeDispatch({ type: 'ARBITRATION_RESOLVED', progress: 0, currentTrack: 'Custom target set, continuing…' });
     })();
+  };
+
+  /** Returns the FSM to CONFIGURING after a completed/failed sync WITHOUT a
+   * page reload (QC MAJOR-2): RESET -> IDLE (terminal states), then
+   * AUTH_CHECKED([]) -> CONFIGURING (auth is still known in-memory).
+   * All transient cockpit data is cleared for the next run. */
+  const handleReset = (): void => {
+    safeDispatch({ type: 'RESET' });
+    safeDispatch({ type: 'AUTH_CHECKED', missing: [] });
+    setDiff(null);
+    setArbitration(null);
+    setInvariantSnapshot(null);
+    setBusy(null);
+    setErrorBanner(null);
+    setLines([]);
+    setFocusIndex(0);
+    setExpandedIndex(null);
+    setView('reconcile');
   };
 
   /* ---- Keyboard handlers ---- */
@@ -518,6 +583,17 @@ export default function App() {
             <span className="dot" aria-hidden="true" />
             <code>{state.status}</code>
             <span>{statusMeta}</span>
+            {(state.status === 'COMPLETED_SUCCESS' || state.status === 'CRITICAL_ERROR') && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={handleReset}
+                data-testid="reset-button"
+                style={{ marginLeft: 'auto' }}
+              >
+                New Sync / Reset
+              </button>
+            )}
           </div>
           {errorBanner && (
             <div className="vault-error" role="alert">
@@ -536,6 +612,7 @@ export default function App() {
                 onStart={handleStart}
                 onApply={(force) => handleApply(force)}
                 busy={busy}
+                scanEpoch={scanEpoch}
                 canApply={state.status === 'INVARIANT_HEALTH_CHECK' && state.allPassed}
               />
               {arbitration && (

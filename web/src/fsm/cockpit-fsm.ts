@@ -25,11 +25,21 @@ export type WebSessionState =
   | { readonly status: 'IDLE' }
   | { readonly status: 'AUTH_REQUIRED'; readonly missing: readonly PlatformId[] }
   | { readonly status: 'CONFIGURING'; readonly source?: string; readonly target?: string }
-  | { readonly status: 'SCANNING_DIFF'; readonly progress: number; readonly currentTrack: string }
+  | {
+      readonly status: 'SCANNING_DIFF';
+      readonly progress: number;
+      readonly currentTrack: string;
+      /** Source/target carried through the scan so post-scan verification
+       * (DIFF_COMPLETE → GET /verify/invariants) knows the target playlist. */
+      readonly source?: string;
+      readonly target?: string;
+    }
   | {
       readonly status: 'AWAITING_ARBITRATION';
       readonly activeTrackId: string;
       readonly candidatesCount: number;
+      readonly source?: string;
+      readonly target?: string;
     }
   | {
       readonly status: 'INVARIANT_HEALTH_CHECK';
@@ -49,6 +59,11 @@ export type FSMEvent =
   | { readonly type: 'ARBITRATION_FOUND'; readonly activeTrackId: string; readonly candidatesCount: number }
   | { readonly type: 'ARBITRATION_RESOLVED'; readonly progress: number; readonly currentTrack: string }
   | { readonly type: 'SCAN_COMPLETE'; readonly allPassed: boolean; readonly violations: readonly string[] }
+  | {
+      readonly type: 'SNAPSHOT_REFRESH';
+      readonly allPassed: boolean;
+      readonly violations: readonly string[];
+    }
   | { readonly type: 'INVARIANTS_PASSED'; readonly totalToWrite: number }
   | { readonly type: 'APPLY_PROGRESS'; readonly writtenCount: number; readonly totalToWrite: number }
   | { readonly type: 'APPLY_COMPLETE'; readonly reportId: string; readonly summaryText: string }
@@ -103,7 +118,13 @@ export function transitionFSM(state: WebSessionState, event: FSMEvent): WebSessi
     case 'CONFIGURING':
       switch (event.type) {
         case 'START_SCAN':
-          return { status: 'SCANNING_DIFF', progress: 0, currentTrack: 'Starting…' };
+          return {
+            status: 'SCANNING_DIFF',
+            progress: 0,
+            currentTrack: 'Starting…',
+            source: event.source,
+            target: event.target,
+          };
         default:
           throw new IllegalTransitionError(state.status, event.type);
       }
@@ -111,12 +132,20 @@ export function transitionFSM(state: WebSessionState, event: FSMEvent): WebSessi
     case 'SCANNING_DIFF':
       switch (event.type) {
         case 'DIFF_PROGRESS':
-          return { status: 'SCANNING_DIFF', progress: event.progress, currentTrack: event.currentTrack };
+          return {
+            status: 'SCANNING_DIFF',
+            progress: event.progress,
+            currentTrack: event.currentTrack,
+            source: state.source,
+            target: state.target,
+          };
         case 'ARBITRATION_FOUND':
           return {
             status: 'AWAITING_ARBITRATION',
             activeTrackId: event.activeTrackId,
             candidatesCount: event.candidatesCount,
+            source: state.source,
+            target: state.target,
           };
         case 'SCAN_COMPLETE':
           return {
@@ -131,13 +160,25 @@ export function transitionFSM(state: WebSessionState, event: FSMEvent): WebSessi
     case 'AWAITING_ARBITRATION':
       switch (event.type) {
         case 'ARBITRATION_RESOLVED':
-          return { status: 'SCANNING_DIFF', progress: event.progress, currentTrack: event.currentTrack };
+          return {
+            status: 'SCANNING_DIFF',
+            progress: event.progress,
+            currentTrack: event.currentTrack,
+            source: state.source,
+            target: state.target,
+          };
         default:
           throw new IllegalTransitionError(state.status, event.type);
       }
 
     case 'INVARIANT_HEALTH_CHECK':
       switch (event.type) {
+        case 'SNAPSHOT_REFRESH':
+          return {
+            status: 'INVARIANT_HEALTH_CHECK',
+            allPassed: event.allPassed,
+            violations: [...event.violations],
+          };
         case 'INVARIANTS_PASSED':
           return { status: 'APPLYING_MUTATIONS', writtenCount: 0, totalToWrite: event.totalToWrite };
         default:

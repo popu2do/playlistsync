@@ -5,7 +5,7 @@
  * and holds 60 FPS scrolling. The list container uses translate3d and
  * will-change: transform per spec 03 §6 (GPU compositing, zero reflow).
  */
-import { memo, useCallback, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { computeVirtualWindow } from '../utils/virtual-window';
 import { formatMs } from '../utils/format';
 
@@ -138,6 +138,23 @@ export function VirtualDiffList({
       window.requestAnimationFrame(() => setScrollTop(el.scrollTop));
     }
   }, [scrollTop]);
+
+  // Focus follows scroll (qc3 WARNING-2): when the focused row moves outside
+  // the rendered window (j/k keyboard navigation), scroll the container so
+  // the focused row is brought back into view. Setting el.scrollTop drives
+  // the throttled onScroll handler, which re-windows the list.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || rows.length === 0) return;
+    const w = computeVirtualWindow(rows.length, viewportHeight, el.scrollTop, ROW_HEIGHT, 5);
+    if (focusedIndex < w.startIndex || focusedIndex >= w.endIndex) {
+      const targetTop = Math.min(
+        Math.max(0, focusedIndex * ROW_HEIGHT - viewportHeight / 2 + ROW_HEIGHT / 2),
+        rows.length * ROW_HEIGHT - viewportHeight,
+      );
+      el.scrollTop = Math.max(0, targetTop);
+    }
+  }, [focusedIndex, rows.length, viewportHeight]);
 
   const win = computeVirtualWindow(rows.length, viewportHeight, scrollTop, ROW_HEIGHT, 5);
   const visibleRows = rows.slice(win.startIndex, win.endIndex);
