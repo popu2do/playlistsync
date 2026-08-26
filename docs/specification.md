@@ -19,6 +19,7 @@ playlistsync <command> [arguments] [options]
 | `inspect` | `status`, `summary` | Display human-readable migration summary and track status | `<playlist_name>` (Required) |
 | `verify` | `validate` | Run invariant integrity checks on source, result, and report datasets | `<playlist_name>` (Required) |
 | `report` | - | Regenerate canonical migration report JSON artifact | `<playlist_name>` (Required) |
+| `web` | - | Start the local-only visual web cockpit with embedded React SPA | None |
 
 ### 1.3 Flag Matrix
 
@@ -37,6 +38,7 @@ playlistsync <command> [arguments] [options]
 | `--output-dir` | - | `output/` | `sync`, `inspect`, `verify`, `report` | Custom working and artifact storage directory |
 | `--json` | - | `""` | `sync` | Direct path to a local source playlist JSON file |
 | `--force` | - | `false` | `login` | Force interactive browser re-authentication, bypassing cached credential validation |
+| `--port` | `-p` | `0` | `web` | HTTP port to bind for the local web cockpit (0 = auto-select `3080-3089` or ephemeral) |
 
 ### 1.4 Exit Codes
 

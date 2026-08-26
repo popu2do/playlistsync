@@ -80,7 +80,28 @@ playlistsync sync "My Favorite Songs" -y -c 8 --proxy="http://127.0.0.1:7890"
 
 ---
 
-## 3. Post-Sync Inspection & Invariant Verification
+## 3. Visual Web Cockpit Workflow (`playlistsync web`)
+
+The `web` command provides a complete, local-only browser visual interface for all operations (authentication, reconciliation, dual-column diff arbitration, invariant health inspection, and report archives).
+
+```bash
+# Start the web cockpit (auto-opens browser to http://127.0.0.1:3080/?token=...)
+playlistsync web
+
+# Start on a custom port
+playlistsync web --port=8080
+```
+
+### Key Cockpit Features:
+1. **Auth Vault**: Browser-based Spotify PKCE OAuth2 authorization and YouTube Music CDP login streaming.
+2. **Reconciliation Deck**: Real-time Added/Removed/Retained 3-way partition, with 44px fixed-height virtual scrolling and full keyboard shortcuts (`1-9` candidate select, `s` skip, `c` custom target ID, `a` apply).
+3. **Clean Extra Modal Guard**: High-risk confirmation dialog preventing accidental destination playlist track deletion.
+4. **Invariant Guardian**: Real-time 5-system-invariant verification radar and conservation math checks before applying changes.
+5. **Idle Watchdog**: Automatically shuts down the server and cleans resources after 15 minutes of inactivity.
+
+---
+
+## 4. Post-Sync Inspection & Invariant Verification
 
 ### 3.1 Inspect Migration Summary
 
@@ -108,7 +129,7 @@ playlistsync report "My Favorite Songs"
 
 ---
 
-## 4. File Path & Artifact Mappings
+## 5. File Path & Artifact Mappings
 
 | File Path | Description | Access Mode |
 | :--- | :--- | :--- |

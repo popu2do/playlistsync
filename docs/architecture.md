@@ -42,9 +42,17 @@
 ## 2. Layer Architecture & Responsibilities
 
 ### 2.1 Presentation Layer (`cmd/playlistsync`)
-- **CLI Command Dispatching**: Implements `sync`, `login`, `inspect`, `verify`, and `report` subcommands.
-- **Option & Flag Parsing**: Handles parameters such as `--from`, `--to`, `--proxy`, `--clean-extra`, `--yes`, `--concurrency`, and `--output-dir`.
+- **CLI Command Dispatching**: Implements `sync`, `login`, `inspect`, `verify`, `report`, and `web` subcommands.
+- **Option & Flag Parsing**: Handles parameters such as `--from`, `--to`, `--proxy`, `--clean-extra`, `--yes`, `--concurrency`, `--port`, and `--output-dir`.
+- **Web Cockpit Server (`cmd/playlistsync/web.go`)**: Wires the loopback HTTP server, protocol bridge, and AES-256-GCM token storage for browser-based operations.
 - **Interactive Prompts**: Manages terminal-based candidate review interactions and maps system outcomes to standard exit codes.
+
+### 2.2 Web Cockpit & Invariant Subsystem (`internal/web`, `internal/invariants`)
+- **`internal/web/bridge`**: Concurrency arbitration bridge between Go synchronization routines and browser SSE/REST streams, with 1024-event ring buffer replay.
+- **`internal/web/server`**: 127.0.0.1 loopback HTTP server, port discovery (`3080-3089`), Bearer auth, CSP headers, and lock-free 15-minute Watchdog timer.
+- **`internal/web/handlers`**: REST/SSE endpoints for session, auth (PKCE + CDP), reconciliation, inspection, verification, and reports.
+- **`internal/web/static`**: Embeds compiled React 18 / TypeScript SPA via Go 1.22+ `embed.FS` (`//go:embed all:dist`).
+- **`internal/invariants`**: Formal $O(N \log N)$ mathematical verifiers for the 5 system invariants (Count, Uniqueness, Order, Diff Completeness, Zero-Trace).
 
 ### 2.2 Domain Layer (`internal/model`)
 - **Canonical Domain Models**: Defines platform-agnostic models (`SpotifyPlaylist`, `SpotifyTrack`, `YTMPlaylist`, `YTMTrack`, `SyncResult`, `SkippedTrack`, `AddedTrack`, `RemovedTrack`, `Verification`).
