@@ -114,6 +114,7 @@ func sessionShutdown(cfg HandlerConfig) http.HandlerFunc {
 		// ALL shutdown origins (watchdog, OS signal, this endpoint), so the
 		// event reaches every client exactly once (qc3-M2). The response is
 		// flushed before shutdown begins (spec 02 §2.1 + §3.1 event #6).
+		w.Header().Set("Connection", "close")
 		writeJSON(w, http.StatusAccepted, map[string]string{"status": "SHUTTING_DOWN"})
 
 		if cfg.Shutdown == nil {

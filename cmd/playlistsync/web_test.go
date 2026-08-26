@@ -403,6 +403,7 @@ func TestAuthorizeEndpointUnauthorized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET authorize without token: %v", err)
 	}
+	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("authorize without token status = %d, want 401", resp.StatusCode)
@@ -414,6 +415,7 @@ func TestAuthorizeEndpointUnauthorized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET callback without token: %v", err)
 	}
+	_, _ = io.Copy(io.Discard, resp2.Body)
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusBadRequest {
 		t.Fatalf("callback without token status = %d, want 400 (not 401)", resp2.StatusCode)
@@ -425,6 +427,7 @@ func TestAuthorizeEndpointUnauthorized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("shutdown: %v", err)
 	}
+	_, _ = io.Copy(io.Discard, resp3.Body)
 	resp3.Body.Close()
 	done := make(chan error, 1)
 	go func() { done <- wait() }()
