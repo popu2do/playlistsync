@@ -89,15 +89,29 @@ func originAllowed(origin string, port int) bool {
 // tests.
 const spotifyCallbackPath = "/api/v1/auth/spotify/callback"
 
-// BearerAuthMiddleware authenticates every request with a constant-time token
-// comparison, accepting the Authorization: Bearer header or the ?token= query
-// parameter. On success it refreshes the idle watchdog (spec 02 §4.2 verbatim;
-// spec 05 §2.2 constant-time requirement).
+// BearerAuthMiddleware authenticates API and SSE traffic with a constant-time
+// token comparison, accepting the Authorization: Bearer header or the ?token=
+// query parameter. Per spec 05 §2.3 (verbatim: "放行 SPA 静态入口 index.html，
+// 其余 API/SSE 强制验证"), the SPA static entry (index.html and its assets) is
+// EXEMPT from the token gate — a multi-file Vite build otherwise 401s its own
+// subresources, because a browser cannot attach the session token to asset
+// requests. Only /api/* and /events enforce the token (plus the exact Spotify
+// callback exemption below). On success it refreshes the idle watchdog (spec
+// 02 §4.2; spec 05 §2.2 constant-time requirement).
 func (s *WebServer) BearerAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == spotifyCallbackPath {
 			// OAuth redirects cannot carry the session token; bearer-exempt.
 			// Loopback-only binding + Origin guard + PKCE state cover it.
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// SPA static entry (index.html + /assets/*) is exempt from the bearer
+		// gate (spec 05 §2.3). The token protects the REST + SSE namespaces,
+		// which are the only paths that mutate state or exfiltrate data.
+		p := r.URL.Path
+		if !strings.HasPrefix(p, "/api/") && !strings.HasPrefix(p, "/events") {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -33,6 +33,10 @@ func TestBearerAuthMiddleware(t *testing.T) {
 	srv := newTestServer(t)
 	handler := srv.BearerAuthMiddleware(okHandler())
 
+	// The token gate applies to /api/* and /events (spec 05 §2.3); the base
+	// path must be an API path so the middleware actually enforces the token.
+	base := "/api/v1/session"
+
 	tests := []struct {
 		name    string
 		header  string
@@ -50,7 +54,7 @@ func TestBearerAuthMiddleware(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:3080/", nil)
+			req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:3080"+base, nil)
 			if tt.header != "" {
 				req.Header.Set("Authorization", tt.header)
 			}
@@ -61,6 +65,39 @@ func TestBearerAuthMiddleware(t *testing.T) {
 			handler.ServeHTTP(rec, req)
 			if rec.Code != tt.want {
 				t.Fatalf("status = %d, want %d", rec.Code, tt.want)
+			}
+		})
+	}
+}
+
+func TestStaticEntryExemptFromBearer(t *testing.T) {
+	// Spec 05 §2.3: the SPA static entry (index.html + assets) is 放行
+	// (exempt) from the bearer gate; only /api/* and /events force the token.
+	// Without this, a multi-file Vite build 401s its own subresources and the
+	// cockpit is a white page.
+	srv := newTestServer(t)
+	handler := srv.BearerAuthMiddleware(okHandler())
+
+	tests := []struct {
+		name string
+		path string
+		want int
+	}{
+		{"static root exempt", "/", http.StatusOK},
+		{"static index.html exempt", "/index.html", http.StatusOK},
+		{"static asset exempt", "/assets/index-abc123.js", http.StatusOK},
+		{"static css exempt", "/assets/index-abc123.css", http.StatusOK},
+		{"static svg exempt", "/favicon.svg", http.StatusOK},
+		{"api still gated", "/api/v1/session", http.StatusUnauthorized},
+		{"events still gated", "/events", http.StatusUnauthorized},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:3080"+tt.path, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tt.want {
+				t.Fatalf("path %q without token: status = %d, want %d", tt.path, rec.Code, tt.want)
 			}
 		})
 	}

@@ -119,17 +119,37 @@ func TestSPAApiNamespaceNeverHitsStatic(t *testing.T) {
 	}
 }
 
-// TestSPARequiresAuth verifies the static handler sits behind bearer auth.
-func TestSPARequiresAuth(t *testing.T) {
+// TestSPAAuthBoundary verifies the spec 05 §2.3 boundary: the SPA static
+// entry (root / index.html / assets) is served WITHOUT a token, while the
+// REST + SSE namespaces remain strictly bearer-gated.
+func TestSPAAuthBoundary(t *testing.T) {
 	staticFS := fstest.MapFS{
-		"index.html": {Data: []byte("<html>cockpit index</html>")},
+		"index.html":    {Data: []byte("<html>cockpit index</html>")},
+		"assets/app.js": {Data: []byte("console.log('app')")},
 	}
 	handler := buildSPAHandlerStack(t, staticFS)
 
-	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:3080/", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 without token", rec.Code)
+	staticTargets := []string{"/", "/index.html", "/assets/app.js", "/some/client/route"}
+	for _, target := range staticTargets {
+		t.Run("static_"+target, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:3080"+target, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("static %s without token: status = %d, want 200 (SPA entry exempt, spec 05 §2.3)", target, rec.Code)
+			}
+		})
+	}
+
+	gatedTargets := []string{"/api/v1/session", "/events"}
+	for _, target := range gatedTargets {
+		t.Run("gated_"+target, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:3080"+target, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("%s without token: status = %d, want 401 (API/SSE always gated)", target, rec.Code)
+			}
+		})
 	}
 }

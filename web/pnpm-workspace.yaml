@@ -1,0 +1,12 @@
+allowBuilds:
+  esbuild: true
+# pnpm 11 settings home (package.json "pnpm" field is no longer read).
+# J: is exFAT -> no symlinks -> hoisted linker required.
+nodeLinker: hoisted
+supportedArchitectures:
+  os:
+    - current
+  cpu:
+    - current
+  libc:
+    - current
