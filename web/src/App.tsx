@@ -285,9 +285,22 @@ export default function App() {
             setLines((prev) => [...prev.slice(-399), logToLine(++lineIdRef.current, log)]);
             break;
           }
-          case 'GAP_FALLBACK':
-            void refreshAll();
+          case 'GAP_FALLBACK': {
+            // User notification + full state resync (qc3 Warning-1): the
+            // backend ring history was overwritten, so this client missed
+            // events. Tell the user, then re-fetch session/auth/diff/reports
+            // so the cockpit matches server truth (includes the transient
+            // scan-state reconciliation — the refreshed diff reflects where
+            // the backend actually is).
+            setErrorBanner('Event stream gap detected. Resynchronizing state with server...');
+            void (async () => {
+              await refreshAll();
+              // Clear only this notice once the resync has settled, without
+              // stomping a pre-existing unrelated error banner.
+              setErrorBanner((prev) => (prev !== null && prev.startsWith('Event stream gap') ? null : prev));
+            })();
             break;
+          }
           case 'SYSTEM_SHUTDOWN':
             setTerminalOpen(true);
             setLines((prev) => [...prev.slice(-399), { id: ++lineIdRef.current, ts: '', module: 'system', level: 'warn', text: 'SYSTEM_SHUTDOWN — server is shutting down' }]);
@@ -473,8 +486,10 @@ export default function App() {
       },
       apply: () => {
         // INVARIANTS_PASSED is legal only from INVARIANT_HEALTH_CHECK
-        // (spec 04 §2 #7); the CONFIGURING branch would throw.
-        if (state.status === 'INVARIANT_HEALTH_CHECK') {
+        // (spec 04 §2 #7) AND only when all invariants passed — otherwise the
+        // backend rejects with 409. Keep the keyboard shortcut exactly as
+        // strict as the pointer path (qc1 M-1).
+        if (state.status === 'INVARIANT_HEALTH_CHECK' && state.allPassed) {
           void handleApply(false);
         }
       },

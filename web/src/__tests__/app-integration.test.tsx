@@ -70,6 +70,8 @@ const mockState = vi.hoisted(() => {
   const state: {
     onEvent?: (ev: CockpitSSEEvent) => void;
     applyDeferred?: { promise: Promise<{ applied: boolean }>; resolve: (v: { applied: boolean }) => void };
+    /** When set, getDiff returns this pending diff to hold a resync open. */
+    gapHold?: { promise: Promise<null>; resolve: (v: null) => void };
     applyCalls: number;
   } = { applyCalls: 0 };
   return state;
@@ -88,7 +90,11 @@ vi.mock('../api/client', async (importOriginal) => {
         youtubeMusic: { authenticated: true, accountName: 'yt-tester', authType: 'cookie' },
       }),
       listReports: vi.fn().mockResolvedValue([]),
-      getDiff: vi.fn().mockResolvedValue(null),
+      getDiff: vi.fn().mockImplementation(() => {
+        const hold = mockState.gapHold;
+        if (hold) return hold.promise;
+        return Promise.resolve(null);
+      }),
       startReconcile: vi.fn().mockResolvedValue({ job_id: 'rec_1', status: 'running', estimated_total_tracks: 2 }),
       applyMutations: vi.fn().mockImplementation(() => {
         mockState.applyCalls += 1;
@@ -149,6 +155,7 @@ async function bootAndStartScan(source: string, target: string): Promise<void> {
 beforeEach(() => {
   mockState.applyCalls = 0;
   mockState.applyDeferred = undefined;
+  mockState.gapHold = undefined;
 });
 
 afterEach(() => {
@@ -253,6 +260,59 @@ describe('App SSE -> FSM dispatch wiring', () => {
     expect(screen.queryByText(/ERROR RECONCILE_FAILED/)).not.toBeInTheDocument();
     // And a fresh run can start again (Start Reconcile input visible).
     expect(screen.getByPlaceholderText('Spotify playlist URL or ID, or drop playlist JSON')).toBeInTheDocument();
+  });
+
+  it('keyboard shortcut a does NOT apply when invariants fail (qc1 M-1)', async () => {
+    mockState.applyCalls = 0;
+    await bootAndStartScan('src-ka', 'dst-ka');
+    // Failing snapshot -> INVARIANT_HEALTH_CHECK with allPassed=false:
+    // the Apply button is disabled and pressing `a` must NOT call
+    // applyMutations (which would 409 server-side).
+    await fireSSE(snapshotEvent(false, 't0'));
+    expect(bannerStatus()).toBe('INVARIANT_HEALTH_CHECK');
+    expect(screen.getByTestId('apply-button')).toBeDisabled();
+
+    fireEvent.keyDown(window, { key: 'a' });
+    await waitFor(() => expect(mockState.applyCalls).toBe(0));
+    expect(bannerStatus()).toBe('INVARIANT_HEALTH_CHECK');
+  });
+
+  it('keyboard shortcut a applies when invariants pass (qc1 M-1 positive)', async () => {
+    mockState.applyCalls = 0;
+    await bootAndStartScan('src-kb', 'dst-kb');
+    await fireSSE(snapshotEvent(true, 't0'));
+    expect(bannerStatus()).toBe('INVARIANT_HEALTH_CHECK');
+    expect(screen.getByTestId('apply-button')).toBeEnabled();
+
+    // Hold applyMutations pending so we can observe the APPLYING_MUTATIONS
+    // state before the immediate resolution races to COMPLETED_SUCCESS.
+    const d = deferred<{ applied: boolean }>();
+    mockState.applyDeferred = d;
+    fireEvent.keyDown(window, { key: 'a' });
+    await waitFor(() => expect(mockState.applyCalls).toBe(1));
+    expect(bannerStatus()).toBe('APPLYING_MUTATIONS');
+    d.resolve({ applied: true });
+    await waitFor(() => expect(bannerStatus()).toBe('COMPLETED_SUCCESS'));
+  });
+
+  it('GAP_FALLBACK shows resync banner and refetches state (qc3 Warning-1)', async () => {
+    render(<App />);
+    await waitFor(() => expect(bannerStatus()).toBe('CONFIGURING'));
+
+    // Hold the resync (getDiff) open so the transient notice is observable.
+    const hold = deferred<null>();
+    mockState.gapHold = hold;
+    await fireSSE({ type: 'GAP_FALLBACK', id: 11, data: { message: 'history gap' } });
+    // User notification during the resync:
+    expect(screen.getByText(/Event stream gap detected/)).toBeInTheDocument();
+
+    // Once the resync settles, the notice clears itself (only its own text).
+    hold.resolve(null);
+    await waitFor(() => expect(screen.queryByText(/Event stream gap detected/)).not.toBeInTheDocument());
+    // Cockpit survived and is still usable (navigate to the reconcile view).
+    fireEvent.click(screen.getByRole('button', { name: /Reconcile/ }));
+    expect(screen.getByPlaceholderText('Spotify playlist URL or ID, or drop playlist JSON')).toBeInTheDocument();
+    expect(bannerStatus()).toBe('CONFIGURING');
   });
 });
 
