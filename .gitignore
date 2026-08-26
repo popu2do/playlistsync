@@ -37,6 +37,8 @@ Desktop.ini
 .windsurf/
 .claude/
 .agents/
+.agent-teams
+docs/spec
 AGENTS.md
 
 # All runtime credentials, inputs, and generated files live in output/ and are 100% ignored
@@ -59,3 +61,10 @@ browser.json
 logs/
 tmp/
 temp/
+
+web/node_modules/
+web/dist/
+web/e2e/.runtime/
+web/test-results/
+web/playwright-report/
+
