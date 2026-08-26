@@ -298,6 +298,13 @@ func (s *WebServer) Shutdown(ctx context.Context) error {
 		if s.config.EventSink != nil {
 			s.config.EventSink.Broadcast("SYSTEM_SHUTDOWN", map[string]interface{}{"reason": "shutdown"})
 		}
+		// qc2 MAJOR-1: give connected SSE clients a short window to flush the
+		// SYSTEM_SHUTDOWN frame from their TCP buffers before the listener /
+		// HTTP drain tears the connection down. Without this, a client that
+		// just received the broadcast could miss it when Shutdown closes the
+		// socket immediately (the E2E watchdog test depends on the browser
+		// observing the event).
+		time.Sleep(150 * time.Millisecond)
 		if s.cancel != nil {
 			s.cancel()
 		}

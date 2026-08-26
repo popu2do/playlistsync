@@ -48,7 +48,7 @@ lint: ## 静态检查 (go vet + staticcheck)；staticcheck 缺失时自动安装
 	command -v staticcheck >/dev/null 2>&1 || go install honnef.co/go/tools/cmd/staticcheck@latest
 	staticcheck ./...
 
-test: ## 运行所有 Go 单元/集成测试 + 前端 Vitest
+test: web-build ## 先构建 SPA (embed.FS 源) 再运行所有 Go 单元/集成测试 + 前端 Vitest
 	go test ./... -count=1
 	cd web && pnpm run test
 

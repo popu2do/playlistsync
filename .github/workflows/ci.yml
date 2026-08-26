@@ -25,6 +25,29 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install web dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      # qc1 MAJOR-1: the SPA bundle (internal/web/static/dist) is embed.FS
+      # input for the Go build; a clean checkout must refresh it BEFORE any
+      # Go compile/test, otherwise the binary/tests embed a stale dist.
+      - name: Build web SPA (embed source)
+        working-directory: web
+        run: pnpm run build
+
       - name: Verify Dependencies
         run: go mod verify
 
@@ -53,6 +76,27 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install web dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      # qc1 MAJOR-1: refresh the embed.FS SPA bundle before cross-compiling.
+      - name: Build web SPA (embed source)
+        working-directory: web
+        run: pnpm run build
 
       - name: Compile Windows amd64
         env:
